@@ -1,0 +1,4 @@
+name = "LQR"
+uuid = "6602f22d-36c1-4a81-af34-126ad92b8d6c"
+authors = ["Brian Jackson <bjack205@gmail.com>"]
+version = "0.1.0"
