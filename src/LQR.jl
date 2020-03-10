@@ -1,5 +1,5 @@
 module LQR
-
-greet() = print("Hello World!")
+using RobotDynamics
+using TrajOptCore
 
 end # module
