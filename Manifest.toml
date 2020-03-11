@@ -33,9 +33,7 @@ version = "1.0.1"
 
 [[DifferentialRotations]]
 deps = ["ForwardDiff", "LinearAlgebra", "StaticArrays"]
-git-tree-sha1 = "8f773f560614ce0c593392536def4d8752b0291c"
-repo-rev = "master"
-repo-url = "https://github.com/RoboticExplorationLab/DifferentialRotations.jl.git"
+path = "/home/brian/.julia/dev/DifferentialRotations"
 uuid = "67b05b69-bfda-4565-9187-7150922e6889"
 version = "0.1.0"
 
@@ -54,6 +52,12 @@ deps = ["CommonSubexpressions", "DiffResults", "DiffRules", "NaNMath", "Random",
 git-tree-sha1 = "88b082d492be6b63f967b6c96b352e25ced1a34c"
 uuid = "f6369f11-7733-5829-9624-2563aa707210"
 version = "0.10.9"
+
+[[InplaceOps]]
+deps = ["LinearAlgebra", "Test"]
+git-tree-sha1 = "50b41d59e7164ab6fda65e71049fee9d890731ff"
+uuid = "505f98c9-085e-5b2c-8e89-488be7bf1f34"
+version = "0.3.0"
 
 [[InteractiveUtils]]
 deps = ["Markdown"]
@@ -105,9 +109,7 @@ uuid = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 
 [[RobotDynamics]]
 deps = ["DifferentialRotations", "DocStringExtensions", "ForwardDiff", "LinearAlgebra", "StaticArrays"]
-git-tree-sha1 = "185dd124f8bfbc0007d6657f1eff07a86ee764a5"
-repo-rev = "master"
-repo-url = "https://github.com/RoboticExplorationLab/RobotDynamics.jl.git"
+path = "/home/brian/.julia/dev/RobotDynamics"
 uuid = "38ceca67-d8d3-44e8-9852-78a5596522e1"
 version = "0.1.0"
 
@@ -146,9 +148,7 @@ uuid = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [[TrajOptCore]]
 deps = ["DifferentialRotations", "DocStringExtensions", "ForwardDiff", "LinearAlgebra", "RobotDynamics", "StaticArrays", "UnsafeArrays"]
-git-tree-sha1 = "aa8b3f83c64b79eabf919b7795dbc31f2a476b73"
-repo-rev = "master"
-repo-url = "https://github.com/RoboticExplorationLab/TrajOptCore.jl.git"
+path = "/home/brian/.julia/dev/TrajOptCore"
 uuid = "6e71adf8-10e1-430f-8fc1-65a685ba327f"
 version = "0.1.0"
 

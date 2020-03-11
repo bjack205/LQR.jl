@@ -5,5 +5,9 @@ version = "0.1.0"
 
 [deps]
 DifferentialRotations = "67b05b69-bfda-4565-9187-7150922e6889"
+InplaceOps = "505f98c9-085e-5b2c-8e89-488be7bf1f34"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 RobotDynamics = "38ceca67-d8d3-44e8-9852-78a5596522e1"
+SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 TrajOptCore = "6e71adf8-10e1-430f-8fc1-65a685ba327f"
