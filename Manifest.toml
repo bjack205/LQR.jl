@@ -148,7 +148,9 @@ uuid = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [[TrajOptCore]]
 deps = ["DifferentialRotations", "DocStringExtensions", "ForwardDiff", "LinearAlgebra", "RobotDynamics", "StaticArrays", "UnsafeArrays"]
-path = "/home/brian/.julia/dev/TrajOptCore"
+git-tree-sha1 = "aa8b3f83c64b79eabf919b7795dbc31f2a476b73"
+repo-rev = "master"
+repo-url = "https://github.com/RoboticExplorationLab/TrajOptCore.jl.git"
 uuid = "6e71adf8-10e1-430f-8fc1-65a685ba327f"
 version = "0.1.0"
 

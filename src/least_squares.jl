@@ -155,7 +155,7 @@ function build_toeplitz(T, L, A, B, tmpA=copy(A), tmpB=copy(B))
     end
 end
 
-function solve!(solver::LeastSquaresSolver, prob::LQRProblem)
+function solve!(sol::LQRSolution, solver::LeastSquaresSolver, prob::LQRProblem)
     H,y = solver.H, solver.y
     A,b = solver.Ā, solver.b̄
     if solver.opts[:matbuild] == :Ab
@@ -176,13 +176,24 @@ function solve!(solver::LeastSquaresSolver, prob::LQRProblem)
     # ldiv!(F,-y)
     if solver.opts[:solve_type] == :cholesky
         if typeof(A) <: SparseMatrixCSC
-            return cholesky(H)\y
+            sol.U_ .= cholesky(H)\y
         else
             LAPACK.potrf!('U', H)
             LAPACK.potrs!('U', H, y)
-            return y
+            sol.U_ .= y
         end
     elseif solver.opts[:solve_type] == :naive
-        -H\y
+        sol.U .= -H\y
+    end
+    rollout!(sol, prob)
+    return nothing
+end
+
+@inline RobotDynamics.rollout!(sol::LQRSolution, prob::LQRProblem) =
+    rollout!(sol, prob.A, prob.B, prob.x0)
+function RobotDynamics.rollout!(sol::LQRSolution, A, B, x0)
+    sol.X[1] .= x0
+    for k in eachindex(sol.U)
+        sol.X[k+1] .= A * sol.X[k] + B * sol.U[k]
     end
 end
