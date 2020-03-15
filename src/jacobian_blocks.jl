@@ -96,8 +96,11 @@ function link_jacobians(blocks, con::ConstraintVals{<:Any,W,<:Any,p}, off) where
     else
         iz = 1:nm
     end
-    ip = off .+ (1:p)
-    ∇c = [view(blocks[k].Y, ip, iz) for k in con.inds, i = 1:1]
+    ip = 1:p
+    ∇c = [view(blocks[k].Y, ip .+ (off[k] + dims(blocks[k])[1]), iz) for k in con.inds, i = 1:1]
+    for k in con.inds
+        off[k] += p
+    end
     ConstraintVals(con, ∇c)
 end
 
@@ -115,12 +118,13 @@ function link_jacobians(blocks, con::ConstraintVals{<:Any,<:Coupled,<:Any,p}, of
     N = length(blocks)
     nm = size(blocks[1].Y,2)
     iz = 1:nm
-    ip = off .+ (1:p)
+    ip = 1:p
     nw = TrajOptCore.widths(con.con)
     function build_view(k,i)
         if i == 1  # current step, place at bottom
             p_coupled, p_stage = dims(blocks[k])
-            ip_ = ip .+  (p_coupled + p_stage)
+            ip_ = ip .+  (p_coupled + p_stage + off[k])
+            off[k] += p
             return view(blocks[k].Y, ip_, iz)
         else
             iz_ = 1:size(blocks[k+1].Y,2)
@@ -132,15 +136,13 @@ function link_jacobians(blocks, con::ConstraintVals{<:Any,<:Coupled,<:Any,p}, of
 end
 
 function link_jacobians(blocks, conSet::ConstraintSet)
-    off_stage = 0
-    off_coupled = 0
+    off_stage = zero(conSet.p)
+    off_coupled = zero(conSet.p)
     for (i,con) in enumerate(conSet.constraints)
         if TrajOptCore.contype(con.con) <: Stage
             conSet.constraints[i] = link_jacobians(blocks, con, off_stage)
-            off_stage += length(con)
         elseif TrajOptCore.contype(con.con) <: Coupled
             conSet.constraints[i] = link_jacobians(blocks, con, off_coupled)
-            off_coupled += length(con)
         else
             throw(ErrorException("$(TrajOptCore.contype(con)) not a supported constraint type."))
         end
@@ -245,64 +247,63 @@ struct BlockTriangular3{p1,ps,p2,T}
     D::SizedMatrix{ps,p1,T,2}
     E::SizedMatrix{p2,ps,T,2}
     F::SizedMatrix{p2,p1,T,2}
-    μ::SVector{ps,T}  # lagrange multiplier for stage constraints
-    λ::SVector{p2,T}  # lagrange multiplier for coupled constraints
-    c::SVector{ps,T}  # stage constraint violation
-    d::SVector{p2,T}  # coupled constraint violation
+    μ::MVector{ps,T}  # lagrange multiplier for stage constraints
+    λ::MVector{p1,T}  # lagrange multiplier for coupled constraints
+    c::MVector{ps,T}  # stage constraint violation
+    d::MVector{p1,T}  # coupled constraint violation
 end
 
 @inline BlockTriangular3(p1,ps,p2) = BlockTriangular3{Float64}(p1,ps,p2)
-function BlockTriangular3{T}(p1,ps,p2) where T
+function BlockTriangular3{T}(p1,ps,p2,A=SizedMatrix{p1,p1}(zeros(T,p1,p1))) where T
     BlockTriangular3{p1,ps,p2,T}(
-        SizedMatrix{p1,p1,T,2}(zeros(T,p1,p1)),
+        A,  # allow for adjacent A,C blocks to be linked
         SizedMatrix{ps,ps,T,2}(zeros(T,ps,ps)),
         SizedMatrix{p2,p2,T,2}(zeros(T,p2,p2)),
         SizedMatrix{ps,p1,T,2}(zeros(T,ps,p1)),
         SizedMatrix{p2,ps,T,2}(zeros(T,p2,ps)),
         SizedMatrix{p2,p1,T,2}(zeros(T,p2,p1)),
-        SVector{ps}(zeros(T,ps)),
-        SVector{p2}(zeros(T,p2)),
-        SVector{ps}(zeros(T,ps)),
-        SVector{p2}(zeros(T,p2))
+        MVector{ps}(zeros(T,ps)),
+        MVector{p1}(zeros(T,p1)),
+        MVector{ps}(zeros(T,ps)),
+        MVector{p1}(zeros(T,p1))
     )
 end
 
-function copy_block!(A, block::BlockTriangular3{p1,ps,p2}, off::Int) where {p1,ps,p2}
-    ip1 = off .+ SVector{p1}(1:p1)
-    ips = off .+ SVector{ps}((1:ps) .+ p1)
-    ip2 = off .+ SVector{p2}((1:p2) .+ (p1+ps))
-    A[ip1,ip1] .+= block.A  # this works since the first A block is always empty
-    A[ips,ips] .= block.B
-    A[ip2,ip2] .= block.C
-    A[ips,ip1] .= block.D
-    A[ip2,ips] .= block.E
-    A[ip2,ip1] .= block.F
-end
 
-function build_shur_factors(conSet::ConstraintSet)
+function build_shur_factors(conSet::ConstraintSet{T}) where T
     p1,ps,p2 = jacobian_dims(conSet)
     N = length(p1)
-    map(1:N) do k
-        BlockTriangular3(p1[k], ps[k], p2[k])
+    F = BlockTriangular3{<:Any,<:Any,<:Any,T}[BlockTriangular3{T}(p1[1], ps[1], p2[1]),]
+    for k = 2:N
+        push!(F, BlockTriangular3{T}(p1[k], ps[k], p2[k], F[k-1].C))
     end
+    return F
 end
 
 @inline dims(::BlockTriangular3{p1,ps,p2}) where {p1,ps,p2} = (p1,ps,p2)
 
-function calculate_shur_factors!(F::Vector{<:BlockTriangular3},
-        obj::Objective{<:DiagonalCost}, blocks)
-    @assert isempty(F[1].A)
-    for (res,costfun,block) in zip(F,obj.cost,blocks)
-        shur!(res, costfun, block)
+function copy_shur_factors!(S, h, λ, F::Vector{<:BlockTriangular3})
+    off = 0
+    for k in eachindex(F)
+        copy_block!(S, h, λ, F[k], off)
+        off += sum(dims(F[k])[1:2])
     end
 end
 
-function copy_shur_factors(S, F::Vector{<:BlockTriangular3})
-    off = 0
-    for k in eachindex(F)
-        copy_block!(S, F[k], off)
-        off += sum(dims(F[k])[1:2])
-    end
+function copy_block!(S, h, λ, block::BlockTriangular3{p1,ps,p2}, off::Int) where {p1,ps,p2}
+    ip1 = off .+ SVector{p1}(1:p1)
+    ips = off .+ SVector{ps}((1:ps) .+ p1)
+    ip2 = off .+ SVector{p2}((1:p2) .+ (p1+ps))
+    S[ip1,ip1] .= block.A  # this works since the first A block is always empty
+    S[ips,ips] .= block.B
+    S[ip2,ip2] .= block.C
+    S[ips,ip1] .= block.D
+    S[ip2,ips] .= block.E
+    S[ip2,ip1] .= block.F
+    h[ip1] .= block.d
+    h[ips] .= block.c
+    λ[ip1] .= block.λ
+    λ[ips] .= block.μ
 end
 
 # function shur!(res::BlockTriangular3, J::QuadraticCost, con::JacobianBlock)
@@ -323,6 +324,14 @@ end
 #     res .= A*Q*A2' .+ A*H'B2' .+ B*H*A2' .+ B*R*B2'
 # end
 
+function calculate_shur_factors!(F::Vector{<:BlockTriangular3},
+        obj::Objective{<:DiagonalCost}, blocks)
+    @assert isempty(F[1].A)
+    for (res,costfun,block) in zip(F,obj.cost,blocks)
+        shur!(res, costfun, block)
+    end
+end
+
 function shur!(res::BlockTriangular3{p1,ps,p2}, J::Union{<:DiagonalCost,<:QuadraticCost},
         con::ConstraintBlock) where {p1,ps,p2}
     n = length(J.q)
@@ -339,7 +348,7 @@ function shur!(res::BlockTriangular3{p1,ps,p2}, J::Union{<:DiagonalCost,<:Quadra
     ips = SVector{ps}((1:ps) .+ p1)
     ip2 = SVector{p2}((1:p2) .+ (p1+ps))
 
-    res.A .= YYt[ip1,ip1]
+    res.A .+= YYt[ip1,ip1]
     res.B .= YYt[ips,ips]
     res.C .= YYt[ip2,ip2]
     res.D .= YYt[ips,ip1]

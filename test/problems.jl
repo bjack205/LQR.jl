@@ -34,13 +34,15 @@ function DoubleIntegrator(D=3, N=101; constrained=false)
     con = LinearConstraint{Equality,State}(n,m,A,b)
     add_constraint!(conSet, con, 2:N-1)
 
-    dyn_con = DynamicsConstraint{RK3}(model, N)
-    add_constraint!(conSet, dyn_con, 1:N-1, 1)
-    xinit = GoalConstraint(x0)
-    add_constraint!(conSet, xinit, 1:1, 1)
+    # dyn_con = DynamicsConstraint{RK3}(model, N)
+    # add_constraint!(conSet, dyn_con, 1:N-1, 1)
+    # xinit = GoalConstraint(x0)
+    # add_constraint!(conSet, xinit, 1:1, 1)
 
 
     prob = Problem(model, obj, xf, tf, x0=x0, constraints=conSet)
+    TrajOptCore.add_dynamics_constraints!(prob)
+    prob
 end
 
 # TrajectoryOptimization.add_dynamics_constraints!(prob)

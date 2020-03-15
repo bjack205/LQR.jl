@@ -1,6 +1,11 @@
 include("problems.jl")
 
-prob =  DoubleIntegrator(1,11)
+prob =  DoubleIntegrator(3,11)
+TrajOptCore.num_constraints!(prob.constraints)
+num_constraints(prob)
+LQR.get_linearized_constraints(prob.constraints)
+LCRProblem(prob)
+prob.constraints.p
 n,m,N = size(prob)
 P = sum(num_constraints(prob))
 NN = num_vars(prob)
@@ -9,17 +14,17 @@ conSet = get_constraints(prob)
 blocks = LQR.build_jacobian_blocks(conSet)
 size(blocks[end].Y) == (n,n)
 
-con = LQR.link_jacobians(blocks, conSet[3], 0)
+con = LQR.link_jacobians(blocks, conSet[3], zeros(Int,N))
 conSet[2].∇c[1]
-con.∇c[1] .= 1
+con.∇c[1] .= 1;
 blocks[2].Y[n+1,:1:n] == ones(n)
 
-con = LQR.link_jacobians(blocks, conSet[1], 0)
+con = LQR.link_jacobians(blocks, conSet[1], zeros(Int,N))
 con.∇c[1] .= 3
 blocks[1].Y[1:n,1:n] == fill(3,n,n)
 blocks[1].Y[1:n,n .+ (1:m)] == zeros(n,m)
 
-con = LQR.link_jacobians(blocks, conSet[2], 0)
+con = LQR.link_jacobians(blocks, conSet[2], zeros(Int,N))
 con.∇c[1] .= 2
 con.∇c[1,2] .= -2
 blocks[1].Y[end-n+1:end, :] == fill(2,n,n+m)
@@ -32,7 +37,7 @@ LQR.shur!(res, J, block)
 @btime LQR.shur!($res, $J, $block)
 
 # Set up the problem
-prob =  DoubleIntegrator(3,11)
+prob =  DoubleIntegrator(3,31)
 n,m,N = size(prob)
 P = sum(num_constraints(prob))
 NN = num_vars(prob)
@@ -41,7 +46,9 @@ conSet = get_constraints(prob)
 
 # Create Jacobian blocks
 blocks = LQR.build_jacobian_blocks(conSet)
+blocks[1]
 LQR.link_jacobians(blocks, conSet)
+evaluate!(conSet, prob.Z)
 jacobian!(conSet, prob.Z)
 
 # Create Shur factor blocks
@@ -50,7 +57,10 @@ LQR.calculate_shur_factors!(F, prob.obj, blocks)
 
 # Create full array versions
 S = zeros(P,P)
-LQR.copy_shur_factors(S, F)
+h = zeros(P)
+λ = zeros(P)
+LQR.copy_shur_factors!(S, h, λ, F)
+LQR.copy_block!(S,h,λ,F[1],0)
 S_ = Symmetric(S, :L)
 
 D = zeros(P, NN)
@@ -63,13 +73,24 @@ LQR.build_H!(H, prob.obj)
 S0 = D*H*D'
 S0 ≈ S_
 
+p = conSet.p
+d = [SizedVector{p[k]}(zeros(p[k]))  for k = 1:N]
+LQR.copy_vals!(d, conSet)
+
 # Calculate cholesky factorization
 L = LQR.build_shur_factors(conSet)
+L[1].c .= prob.x0
 cholesky!(L, F)
+LQR.forward_substitution!(L)
 
 L_ = zero(S0)
-LQR.copy_shur_factors(L_, L)
+LQR.copy_shur_factors!(L_,h,λ, L)
 L_ ≈ cholesky(S0).L
+cholesky(S0).L\h ≈ λ
+
+LQR.backward_substitution!(L)
+LQR.copy_shur_factors!(L_,h,λ, L)
+cholesky(S0)\h ≈ λ
 
 
 D = Diagonal(@SVector ones(40))
