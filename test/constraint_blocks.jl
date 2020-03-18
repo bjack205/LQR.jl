@@ -1,34 +1,30 @@
 include("problems.jl")
 
 prob =  DoubleIntegrator(3,11)
-TrajOptCore.num_constraints!(prob.constraints)
-num_constraints(prob)
-LQR.get_linearized_constraints(prob.constraints)
-LCRProblem(prob)
-prob.constraints.p
 n,m,N = size(prob)
-P = sum(num_constraints(prob))
-NN = num_vars(prob)
-rollout!(prob)
 conSet = get_constraints(prob)
-blocks = LQR.build_jacobian_blocks(conSet)
-size(blocks[end].Y) == (n,n)
+blocks = TrajOptCore.ConstraintBlocks(conSet)
+blocks[2].D1
+blocks[end-1]
+solver = LQR.CholeskySolver(prob)
 
-con = LQR.link_jacobians(blocks, conSet[3], zeros(Int,N))
-conSet[2].∇c[1]
-con.∇c[1] .= 1;
-blocks[2].Y[n+1,:1:n] == ones(n)
-
-con = LQR.link_jacobians(blocks, conSet[1], zeros(Int,N))
-con.∇c[1] .= 3
-blocks[1].Y[1:n,1:n] == fill(3,n,n)
-blocks[1].Y[1:n,n .+ (1:m)] == zeros(n,m)
-
-con = LQR.link_jacobians(blocks, conSet[2], zeros(Int,N))
-con.∇c[1] .= 2
-con.∇c[1,2] .= -2
-blocks[1].Y[end-n+1:end, :] == fill(2,n,n+m)
-blocks[2].Y[1:n,:] == fill(-2,n,n+m)
+# evaluate!(conSet, prob.Z)
+# jacobian!(conSet, prob.Z)
+# con = LQR.link_jacobians(blocks, conSet[3], zeros(Int,N))
+# conSet[2].∇c[1]
+# con.∇c[1] .= 1;
+# blocks[2].Y[n+1,:1:n] == ones(n)
+#
+# con = LQR.link_jacobians(blocks, conSet[1], zeros(Int,N))
+# con.∇c[1] .= 3
+# blocks[1].Y[1:n,1:n] == fill(3,n,n)
+# blocks[1].Y[1:n,n .+ (1:m)] == zeros(n,m)
+#
+# con = LQR.link_jacobians(blocks, conSet[2], zeros(Int,N))
+# con.∇c[1] .= 2
+# con.∇c[1,2] .= -2
+# blocks[1].Y[end-n+1:end, :] == fill(2,n,n+m)
+# blocks[2].Y[1:n,:] == fill(-2,n,n+m)
 
 block = blocks[2]
 J = prob.obj[2]
@@ -37,7 +33,7 @@ LQR.shur!(res, J, block)
 @btime LQR.shur!($res, $J, $block)
 
 # Set up the problem
-prob =  DoubleIntegrator(3,31)
+prob =  DoubleIntegrator(1,11)
 n,m,N = size(prob)
 P = sum(num_constraints(prob))
 NN = num_vars(prob)
@@ -45,27 +41,30 @@ rollout!(prob)
 conSet = get_constraints(prob)
 
 # Create Jacobian blocks
-blocks = LQR.build_jacobian_blocks(conSet)
-blocks[1]
-LQR.link_jacobians(blocks, conSet)
-evaluate!(conSet, prob.Z)
-jacobian!(conSet, prob.Z)
+blocks = TrajOptCore.ConstraintBlocks(conSet)
+evaluate!(blocks, prob.Z)
+jacobian!(blocks, prob.Z)
 
 # Create Shur factor blocks
-F = LQR.build_shur_factors(conSet)
+F = LQR.build_shur_factors(blocks)
 LQR.calculate_shur_factors!(F, prob.obj, blocks)
+F[2].c
+blocks[1].c
 
 # Create full array versions
 S = zeros(P,P)
-h = zeros(P)
+d_ = zeros(P)
 λ = zeros(P)
-LQR.copy_shur_factors!(S, h, λ, F)
-LQR.copy_block!(S,h,λ,F[1],0)
+LQR.copy_shur_factors!(S, d_, λ, F)
 S_ = Symmetric(S, :L)
 
+
 D = zeros(P, NN)
-D_ = LQR.jacobian_views!(D,conSet)
-LQR.copy_jacobians!(D_, blocks)
+d = zeros(P)
+vblocks = TrajOptCore.ConstraintBlocks(D,d,blocks)
+evaluate!(vblocks, prob.Z)
+jacobian!(vblocks, prob.Z)
+blocks[1].Y ≈ vblocks[1].Y
 
 H = zeros(NN,NN)
 LQR.build_H!(H, prob.obj)
@@ -73,24 +72,19 @@ LQR.build_H!(H, prob.obj)
 S0 = D*H*D'
 S0 ≈ S_
 
-p = conSet.p
-d = [SizedVector{p[k]}(zeros(p[k]))  for k = 1:N]
-LQR.copy_vals!(d, conSet)
-
 # Calculate cholesky factorization
-L = LQR.build_shur_factors(conSet)
-L[1].c .= prob.x0
+L = LQR.build_shur_factors(blocks)
 cholesky!(L, F)
 LQR.forward_substitution!(L)
 
 L_ = zero(S0)
-LQR.copy_shur_factors!(L_,h,λ, L)
+LQR.copy_shur_factors!(L_,d_,λ, L)
 L_ ≈ cholesky(S0).L
-cholesky(S0).L\h ≈ λ
+cholesky(S0).L\d_ ≈ λ
 
 LQR.backward_substitution!(L)
-LQR.copy_shur_factors!(L_,h,λ, L)
-cholesky(S0)\h ≈ λ
+LQR.copy_shur_factors!(L_,d_,λ, L)
+cholesky(S0)\d_ ≈ λ
 
 
 D = Diagonal(@SVector ones(40))

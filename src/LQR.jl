@@ -8,7 +8,7 @@ using SparseArrays
 
 abstract type AbstractSolver end
 
-import TrajOptCore: num_constraints
+import TrajOptCore: num_constraints, dims
 
 export
     LQRProblem,

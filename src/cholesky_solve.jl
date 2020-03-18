@@ -26,12 +26,13 @@ function forward_substitution!(L::Vector{<:BlockTriangular3})
 end
 
 function forward_substitution!(L1::BlockTriangular3, L2::BlockTriangular3)
-    L2.λ .= L1.C\(L2.d - L1.F*L1.λ - L1.E*L1.μ)
-    L2.μ .= L2.B\(L2.c - L2.D*L2.λ)
+    L2.μ .= L2.B\(L2.c - L2.D*L1.λ)
+    L2.λ .= L2.C\(L2.d - L2.F*L1.λ - L2.E*L2.μ)
 end
 
 function forward_substitution!(L::BlockTriangular3)
     L.μ .= L.B\L.c
+    L.λ .= L.C\(L.d - L.E*L.μ)
 end
 
 function backward_substitution!(L::Vector{<:BlockTriangular3})
@@ -44,15 +45,10 @@ function backward_substitution!(L::Vector{<:BlockTriangular3})
 end
 
 function backward_substitution!(L::BlockTriangular3, Lprev::BlockTriangular3)
-    λprev = Lprev.λ
-    μ,λ = L.μ, L.λ
-    c,d = L.μ, L.λ
-
-    μ .= L.B'\(c - L.E'λprev)
-    λ .= L.A'\(d - L.D'μ - L.F'λprev)
+    L.λ .= L.C'\(L.λ - Lprev.D'*Lprev.μ - Lprev.F'Lprev.λ)
+    L.μ .= L.B'\(L.μ - L.E'L.λ)
 end
 
 function backward_substitution!(L::BlockTriangular3)
     L.μ .= L.B\L.μ
-    L.λ .= L.A\(L.λ - L.D'L.μ)
 end
