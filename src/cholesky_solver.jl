@@ -1,12 +1,20 @@
 
-struct CholeskySolver{T,D}
+struct CholeskySolver{n,m,nm,T,D}
     obj::Objective
+    J::Objective
+    Jinv::Objective{<:QuadraticCost}
     constraint_blocks::Vector{ConstraintBlock{T,Vector{T},Vector{T},Matrix{T},Matrix{T},D}}
     shur_blocks::Vector{<:BlockTriangular3{<:Any,<:Any,<:Any,T}}
     chol_blocks::Vector{<:BlockTriangular3{<:Any,<:Any,<:Any,T}}
+    δZ::Vector{KnotPoint{T,n,m,nm}}
+    Z::Vector{KnotPoint{T,n,m,nm}}
+    Z̄::Vector{KnotPoint{T,n,m,nm}}
 end
 
 function CholeskySolver(prob::Problem)
+    J = TrajOptCore.QuadraticObjective(prob.obj)
+    Jinv = Objective(inv.(J))
+
     conSet = get_constraints(prob)
     blocks = TrajOptCore.ConstraintBlocks(conSet)
     shur_blocks = build_shur_factors(blocks, :U)
@@ -18,6 +26,17 @@ function CholeskySolver(prob::Problem)
 end
 
 function solve!(sol, solver::CholeskySolver)
+    for i = 1:10
+        # Update constraints
+        evaluate!(blocks, solver.Z)
+        jacobian!(blocks, solver.Z)
+
+        # Update cost function
+        cost_expansion!(solver.J, solver.obj, solver.Z)
+    end
+end
+
+function _solve!(solver::CholeskySolver)
     calculate_shur_factors!(solver.shur_blocks, solver.obj, solver.constraint_blocks)
     # chol = solver.chol_blocks
     # cholesky!(chol, solver.shur_blocks)

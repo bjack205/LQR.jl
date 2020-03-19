@@ -1,6 +1,11 @@
 include("problems.jl")
 
 prob =  DoubleIntegrator(3,11)
+
+J = Objective(TrajOptCore.QuadraticCostFunction.(prob.obj.cost))
+J = TrajOptCore.QuadraticObjective(prob.obj)
+Jinv = Objective(inv.(J))
+
 n,m,N = size(prob)
 prob.obj[N-1]
 conSet = get_constraints(prob)
@@ -26,6 +31,12 @@ solver = LQR.CholeskySolver(prob)
 # con.∇c[1,2] .= -2
 # blocks[1].Y[end-n+1:end, :] == fill(2,n,n+m)
 # blocks[2].Y[1:n,:] == fill(-2,n,n+m)
+A = rand(10,10)
+A = A'A
+inv(A)
+LAPACK.potri!('L',A)
+LAPACK.sytri!('U', A, zeros(Int,10))
+A
 
 block = blocks[2]
 J = prob.obj[2]
@@ -135,6 +146,7 @@ copyto!(sol, prob.Z)
 Z0 = copy(sol.Z)
 solver = LQR.CholeskySolver(prob)
 LQR.solve!(sol, solver)
+@btime LQR.solve!($sol, $solver)
 
 sol.Z .+= Z0
 A = prob.constraints[2].con.A
@@ -150,6 +162,7 @@ sol = LQRSolution(prob)
 solver = LQR.CholeskySolver(prob)
 @btime LQR.calculate_shur_factors!($solver.shur_blocks, $solver.obj, $solver.constraint_blocks)
 @btime cholesky!($solver.chol_blocks, $solver.shur_blocks)
+@btime cholesky!($solver.shur_blocks)
 @btime LQR.forward_substitution!($solver.chol_blocks)
 @btime LQR.backward_substitution!($solver.chol_blocks)
 @btime LQR.calculate_primals!($sol, $solver.obj, $solver.chol_blocks, $solver.constraint_blocks)
