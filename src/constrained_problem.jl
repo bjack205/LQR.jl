@@ -3,7 +3,7 @@ struct LCRProblem{n,m,T}
     A::Vector{SizedMatrix{n,n,T,2}}      # dynamics state Jacobian
     B::Vector{SizedMatrix{n,m,T,2}}      # dynamics control Jacobian
     C::Vector{SizedMatrix{<:Any,n,T,2}}  # constraint state Jacobian
-    D::Vector{SizedMatrix{<:Any,n,T,2}}  # constraint control Jacobian
+    D::Vector{SizedMatrix{<:Any,m,T,2}}  # constraint control Jacobian
     d::Vector{MVector{<:Any,T}}    # constraint constant
     x0::SVector{n,T}
     tf::T
@@ -34,7 +34,7 @@ function get_linearized_constraints(conSet::ConstraintSet)
     n,m = size(conSet)
     N = length(conSet.p)
     p = copy(conSet.p) # don't count the dynamics constraint
-    p[1:n-1] .-= n
+    p[1:N-1] .-= n
 
     A = [SizedMatrix{n,n}(zeros(n,n)) for k = 1:N]
     B = [SizedMatrix{n,m}(zeros(n,m)) for k = 1:N]

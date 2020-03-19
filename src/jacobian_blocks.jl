@@ -1,5 +1,5 @@
 using TrajOptCore
-import TrajOptCore: ConstraintBlocks
+import TrajOptCore: ConstraintBlocks, hessian, gradient
 
 # struct JacobianBlock{n,m,p,T}
 #     Ā::SizedMatrix{n,n,T,2}
@@ -173,9 +173,20 @@ function TrajOptCore.hessian(J::QuadraticCost{<:Diagonal{<:Any,<:SVector},<:Diag
 end
 
 function TrajOptCore.hessian(J::DiagonalCost)
-    return Diagonal([J.Q.diag; J.R.diag])
+    if J.terminal
+        J.Q
+    else
+        Diagonal([J.Q.diag; J.R.diag])
+    end
 end
 
+function TrajOptCore.gradient(J::DiagonalCost)
+    if J.terminal
+        J.q
+    else
+        [J.q; J.r]
+    end
+end
 
 function build_H!(H, obj::Objective{<:Diagonal}, ::Size{sa}) where sa
     n,m = sa
@@ -222,41 +233,78 @@ end
 #        BLOCK TRIANGULAR FACTORS         #
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
 
-struct BlockTriangular3{p1,ps,p2,T}
+abstract type BlockTriangular3{p1,ps,p2,T} end
+
+struct BlockUpperTriangular3{p1,ps,p2,T} <: BlockTriangular3{p1,ps,p2,T}
+    A::SizedMatrix{p1,p1,T,2}
+    B::SizedMatrix{ps,ps,T,2}
+    C::SizedMatrix{p2,p2,T,2}
+    D::SizedMatrix{p1,ps,T,2}
+    E::SizedMatrix{ps,p2,T,2}
+    F::SizedMatrix{p1,p2,T,2}
+    μ::SizedVector{ps,T,1}  # lagrange multiplier for stage constraints
+    λ::SizedVector{p2,T,1}  # lagrange multiplier for coupled constraints
+    c::SizedVector{ps,T,1}  # stage constraint violation
+    d::SizedVector{p2,T,1}  # coupled constraint violation
+end
+
+@inline BlockUpperTriangular3(p1,ps,p2) = BlockLowerTriangular3{Float64}(p1,ps,p2)
+function BlockUpperTriangular3{T}(p1,ps,p2,A=SizedMatrix{p1,p1}(zeros(T,p1,p1))) where T
+    BlockUpperTriangular3{p1,ps,p2,T}(
+        A,  # allow for adjacent A,C blocks to be linked
+        SizedMatrix{ps,ps,T,2}(zeros(T,ps,ps)),
+        SizedMatrix{p2,p2,T,2}(zeros(T,p2,p2)),
+        SizedMatrix{p1,ps,T,2}(zeros(T,p1,ps)),
+        SizedMatrix{ps,p2,T,2}(zeros(T,ps,p2)),
+        SizedMatrix{p1,p2,T,2}(zeros(T,p1,p2)),
+        SizedVector{ps}(zeros(T,ps)),
+        SizedVector{p2}(zeros(T,p2)),
+        SizedVector{ps}(zeros(T,ps)),
+        SizedVector{p2}(zeros(T,p2))
+    )
+end
+
+struct BlockLowerTriangular3{p1,ps,p2,T} <: BlockTriangular3{p1,ps,p2,T}
     A::SizedMatrix{p1,p1,T,2}
     B::SizedMatrix{ps,ps,T,2}
     C::SizedMatrix{p2,p2,T,2}
     D::SizedMatrix{ps,p1,T,2}
     E::SizedMatrix{p2,ps,T,2}
     F::SizedMatrix{p2,p1,T,2}
-    μ::MVector{ps,T}  # lagrange multiplier for stage constraints
-    λ::MVector{p2,T}  # lagrange multiplier for coupled constraints
-    c::MVector{ps,T}  # stage constraint violation
-    d::MVector{p2,T}  # coupled constraint violation
+    μ::SizedVector{ps,T,1}  # lagrange multiplier for stage constraints
+    λ::SizedVector{p2,T,1}  # lagrange multiplier for coupled constraints
+    c::SizedVector{ps,T,1}  # stage constraint violation
+    d::SizedVector{p2,T,1}  # coupled constraint violation
 end
 
-@inline BlockTriangular3(p1,ps,p2) = BlockTriangular3{Float64}(p1,ps,p2)
-function BlockTriangular3{T}(p1,ps,p2,A=SizedMatrix{p1,p1}(zeros(T,p1,p1))) where T
-    BlockTriangular3{p1,ps,p2,T}(
+@inline BlockLowerTriangular3(p1,ps,p2) = BlockLowerTriangular3{Float64}(p1,ps,p2)
+function BlockLowerTriangular3{T}(p1,ps,p2,A=SizedMatrix{p1,p1}(zeros(T,p1,p1))) where T
+    BlockLowerTriangular3{p1,ps,p2,T}(
         A,  # allow for adjacent A,C blocks to be linked
         SizedMatrix{ps,ps,T,2}(zeros(T,ps,ps)),
         SizedMatrix{p2,p2,T,2}(zeros(T,p2,p2)),
         SizedMatrix{ps,p1,T,2}(zeros(T,ps,p1)),
         SizedMatrix{p2,ps,T,2}(zeros(T,p2,ps)),
         SizedMatrix{p2,p1,T,2}(zeros(T,p2,p1)),
-        MVector{ps}(zeros(T,ps)),
-        MVector{p2}(zeros(T,p2)),
-        MVector{ps}(zeros(T,ps)),
-        MVector{p2}(zeros(T,p2))
+        SizedVector{ps}(zeros(T,ps)),
+        SizedVector{p2}(zeros(T,p2)),
+        SizedVector{ps}(zeros(T,ps)),
+        SizedVector{p2}(zeros(T,p2))
     )
 end
 
-function build_shur_factors(blocks::ConstraintBlocks{T}) where T
+function build_shur_factors(blocks::ConstraintBlocks{T}, uplo=:L) where T
     p1,ps,p2 = collect(zip(TrajOptCore.dims.(blocks)...))
     N = length(p1)
-    F = BlockTriangular3{<:Any,<:Any,<:Any,T}[BlockTriangular3{T}(p1[1], ps[1], p2[1]),]
+    if uplo == :L
+        F = BlockLowerTriangular3{<:Any,<:Any,<:Any,T}[BlockLowerTriangular3{T}(p1[1], ps[1], p2[1]),]
+        Block = BlockLowerTriangular3{T}
+    elseif uplo == :U
+        F = BlockUpperTriangular3{<:Any,<:Any,<:Any,T}[BlockUpperTriangular3{T}(p1[1], ps[1], p2[1]),]
+        Block = BlockUpperTriangular3{T}
+    end
     for k = 2:N
-        push!(F, BlockTriangular3{T}(p1[k], ps[k], p2[k], F[k-1].C))
+        push!(F, Block(p1[k], ps[k], p2[k], F[k-1].C))
     end
     return F
 end
@@ -287,6 +335,22 @@ function copy_block!(S, h, λ, block::BlockTriangular3{p1,ps,p2}, off::Int) wher
     λ[ips] .= block.μ
 end
 
+function copy_block!(S, h, λ, block::BlockUpperTriangular3{p1,ps,p2}, off::Int) where {p1,ps,p2}
+    ip1 = off .+ SVector{p1}(1:p1)
+    ips = off .+ SVector{ps}((1:ps) .+ p1)
+    ip2 = off .+ SVector{p2}((1:p2) .+ (p1+ps))
+    S[ip1,ip1] .= block.A  # this works since the first A block is always empty
+    S[ips,ips] .= block.B
+    S[ip2,ip2] .= block.C
+    S[ip1,ips] .= block.D
+    S[ips,ip2] .= block.E
+    S[ip1,ip2] .= block.F
+    h[ip2] .= block.d
+    h[ips] .= block.c
+    λ[ip2] .= block.λ
+    λ[ips] .= block.μ
+end
+
 # function shur!(res::BlockTriangular3, J::QuadraticCost, con::JacobianBlock)
 #     Q,R,H = J.Q, J.R, J.H
 #     Ā,B̄ = con.Ā, con.B̄
@@ -307,22 +371,90 @@ end
 
 function calculate_shur_factors!(F::Vector{<:BlockTriangular3},
         obj::Objective{<:DiagonalCost}, blocks)
-    @assert isempty(F[1].A)
-    for (res,costfun,block) in zip(F,obj.cost,blocks)
-        shur!(res, costfun, block)
+    # @assert isempty(F[1].A)
+    N = length(blocks)
+    for k = 1:N-1
+        shur!(obj.cost[k], blocks[k])
+        copy_shur!(F[k], blocks[k], blocks[k+1])
     end
+    shur!(obj.cost[N], blocks[N])
+    copy_shur!(F[N], blocks[N])
+    # for k = 1:N-1
+    #     shur!(F[k], obj.cost[k], obj.cost[k+1], blocks[k], blocks[k+1])
+    # end
+    # _shur!(F[N], obj.cost[N], blocks[N])
+ end
+
+function shur!(Jinv, block)
+    H,g = hessian(Jinv), gradient(Jinv)
+
+    mul!(block.YJ, block.Y, H)
+    mul!(block.YYt, block.YJ, block.Y')
+    YYt = block.YYt
+
+    Hg = H\g
+    mul!(block.r, block.YJ, g)
 end
 
-function shur!(res::BlockTriangular3{p1,ps,p2}, J::Union{<:DiagonalCost,<:QuadraticCost},
+function copy_shur!(res::BlockTriangular3{p1,ps,p2}, block, block2) where {p1,ps,p2}
+    copy_shur!(res, block)
+    res.d .+= block2.r_[1]
+end
+
+function copy_shur!(res::BlockTriangular3{p1,ps,p2}, block) where {p1,ps,p2}
+    YYt = block.YYt
+    ip1 = SVector{p1}(1:p1)
+    ips = SVector{ps}((1:ps) .+ p1)
+    ip2 = SVector{p2}((1:p2) .+ (p1+ps))
+
+    res.A .+= YYt[ip1,ip1]
+    res.B .= YYt[ips,ips]
+    res.C .= YYt[ip2,ip2]
+    res.D .= YYt[ips,ip1]
+    res.E .= YYt[ip2,ips]
+    res.F .= YYt[ip2,ip1]
+
+    res.c .= block.c .+ block.r_[2]
+    res.d .= block.d .+ block.r_[3]
+end
+
+function copy_shur!(res::BlockUpperTriangular3{p1,ps,p2}, block) where {p1,ps,p2}
+    YYt = block.YYt
+    ip1 = SVector{p1}(1:p1)
+    ips = SVector{ps}((1:ps) .+ p1)
+    ip2 = SVector{p2}((1:p2) .+ (p1+ps))
+
+    res.A .+= YYt[ip1,ip1]
+    res.B .= YYt[ips,ips]
+    res.C .= YYt[ip2,ip2]
+    res.D .= YYt[ip1,ips]
+    res.E .= YYt[ips,ip2]
+    res.F .= YYt[ip1,ip2]
+
+    res.c .= block.c .+ block.r_[2]
+    res.d .= block.d .+ block.r_[3]
+end
+
+function shur!(res::BlockTriangular3{p1,ps,p2},
+        Jinv::Union{<:DiagonalCost,<:QuadraticCost}, J2inv,
+        block::ConstraintBlock, block2::ConstraintBlock) where {p1,ps,p2}
+
+    _shur!(res, Jinv, block)
+
+    H2,g2 = hessian(J2inv), gradient(J2inv)
+    Hg = H2\g2
+    mul!(res.d, block2.D2, Hg, 1.0, 1.0)
+    # res.d .+= block2.D2*(H2\g2)
+    return nothing
+end
+
+function _shur!(res::BlockTriangular3{p1,ps,p2},
+        Jinv::Union{<:DiagonalCost,<:QuadraticCost},
         block::ConstraintBlock) where {p1,ps,p2}
-    n = length(J.q)
-    if size(block.Y,2) == n  # terminal cost
-        H = J.Q
-    else
-        H = TrajOptCore.hessian(J)
-    end
-    mul!(block.JYt, H, block.Y')
-    mul!(block.YYt, block.Y, block.JYt)
+    H,g = hessian(Jinv), gradient(Jinv)
+
+    mul!(block.YJ, block.Y, H)
+    mul!(block.YYt, block.YJ, block.Y')
     YYt = block.YYt
 
     ip1 = SVector{p1}(1:p1)
@@ -336,6 +468,12 @@ function shur!(res::BlockTriangular3{p1,ps,p2}, J::Union{<:DiagonalCost,<:Quadra
     res.E .= YYt[ip2,ips]
     res.F .= YYt[ip2,ip1]
 
-    res.c .= block.c
-    res.d .= block.d
+    # res.c .= block.c .+ block.C*(H\g)
+    # res.d .= block.d .+ block.D1*(H\g)
+    Hg = H*g
+    mul!(res.c, block.C, Hg)
+    res.c .+= block.c
+    mul!(res.d, block.D1, Hg)
+    res.d .+= block.d
+    return nothing
 end

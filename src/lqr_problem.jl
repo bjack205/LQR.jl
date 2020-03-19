@@ -75,3 +75,12 @@ function LQRSolution(n,m,N,tf)
 end
 
 @inline LQRSolution(prob::LQRProblem{n,m}) where {n,m} = LQRSolution(n,m, prob.N, prob.tf)
+@inline LQRSolution(prob::Problem) = LQRSolution(size(prob)..., prob.tf)
+
+function Base.copyto!(sol::LQRSolution, Z::Traj)
+    N = length(Z)
+    for k = 1:N-1 
+        sol.Z_[k].z .= Z[k].z
+    end
+    sol.Z_[N].z .= state(Z[N])
+end

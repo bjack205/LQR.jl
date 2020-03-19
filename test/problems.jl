@@ -3,6 +3,7 @@ using TrajOptCore
 using LQR
 using RobotDynamics
 using RobotZoo
+using Random
 
 using StaticArrays
 using LinearAlgebra
@@ -11,6 +12,7 @@ using SparseArrays
 import LQR: KnotPoint
 
 function DoubleIntegrator(D=3, N=101; constrained=false)
+    Random.seed!(1)
     model = RobotZoo.DoubleIntegrator(D)
     n,m = size(model)
     tf = 2.0
@@ -33,6 +35,8 @@ function DoubleIntegrator(D=3, N=101; constrained=false)
     b = zeros(p)
     con = LinearConstraint{Equality,State}(n,m,A,b)
     add_constraint!(conSet, con, 2:N-1)
+    goal = GoalConstraint(xf)
+    add_constraint!(conSet, goal, N:N)
 
     # dyn_con = DynamicsConstraint{RK3}(model, N)
     # add_constraint!(conSet, dyn_con, 1:N-1, 1)

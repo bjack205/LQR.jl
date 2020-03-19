@@ -30,5 +30,6 @@ include("dynamic_programming.jl")
 include("jacobian_blocks.jl")
 include("constrained_problem.jl")
 include("cholesky_solve.jl")
+include("cholesky_solver.jl")
 
 end # module

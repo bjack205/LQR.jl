@@ -2,6 +2,7 @@ include("problems.jl")
 
 prob =  DoubleIntegrator(3,11)
 n,m,N = size(prob)
+prob.obj[N-1]
 conSet = get_constraints(prob)
 blocks = TrajOptCore.ConstraintBlocks(conSet)
 blocks[2].D1
@@ -33,7 +34,7 @@ LQR.shur!(res, J, block)
 @btime LQR.shur!($res, $J, $block)
 
 # Set up the problem
-prob =  DoubleIntegrator(1,11)
+prob =  DoubleIntegrator(2,11)
 n,m,N = size(prob)
 P = sum(num_constraints(prob))
 NN = num_vars(prob)
@@ -46,10 +47,14 @@ evaluate!(blocks, prob.Z)
 jacobian!(blocks, prob.Z)
 
 # Create Shur factor blocks
+iobj = Objective(inv.(prob.obj.cost))
 F = LQR.build_shur_factors(blocks)
-LQR.calculate_shur_factors!(F, prob.obj, blocks)
-F[2].c
-blocks[1].c
+Ft = LQR.build_shur_factors(blocks, :U)
+LQR.calculate_shur_factors!(F, iobj, blocks)
+LQR.calculate_shur_factors!(Ft, iobj, blocks)
+F[10].D ≈ (Ft[10].D')
+F[10].F ≈ (Ft[10].F')
+F[10].B ≈ (Ft[10].B')
 
 # Create full array versions
 S = zeros(P,P)
@@ -57,41 +62,138 @@ d_ = zeros(P)
 λ = zeros(P)
 LQR.copy_shur_factors!(S, d_, λ, F)
 S_ = Symmetric(S, :L)
-
+d_
 
 D = zeros(P, NN)
 d = zeros(P)
 vblocks = TrajOptCore.ConstraintBlocks(D,d,blocks)
 evaluate!(vblocks, prob.Z)
 jacobian!(vblocks, prob.Z)
-blocks[1].Y ≈ vblocks[1].Y
+d ≈ d_
 
 H = zeros(NN,NN)
 LQR.build_H!(H, prob.obj)
 
-S0 = D*H*D'
+S0 = Symmetric(D*(H\D'))
 S0 ≈ S_
 
 # Calculate cholesky factorization
+LQR.calculate_shur_factors!(F, iobj, blocks)
+LQR.calculate_shur_factors!(Ft, iobj, blocks)
 L = LQR.build_shur_factors(blocks)
+U = LQR.build_shur_factors(blocks, :U)
+
 cholesky!(L, F)
+LQR.Ucholesky!(U, Ft)
 LQR.forward_substitution!(L)
+LQR.forward_substitution!(U)
+# LQR.Ucholesky!(Ft)
 
-L_ = zero(S0)
+# @btime cholesky!($L, $F)
+# @btime LQR.Ucholesky!($U, $Ft)
+# @btime LQR.Ucholesky!($Ft)
+
+L_ = zeros(P,P)
+U_ = zeros(P,P)
+U2_ = zeros(P,P)
+# LQR.copy_shur_factors!(U_,d_,λ, Ft)
 LQR.copy_shur_factors!(L_,d_,λ, L)
+LQR.copy_shur_factors!(U_,d_,λ, U)
+L_ ≈ U_'
 L_ ≈ cholesky(S0).L
-cholesky(S0).L\d_ ≈ λ
+U_ ≈ cholesky(S0).U
+cholesky(S0).L\d ≈ λ
 
+λ_ = copy(λ)
 LQR.backward_substitution!(L)
+LQR.backward_substitution!(U)
+# @btime LQR.backward_substitution!($U)
 LQR.copy_shur_factors!(L_,d_,λ, L)
-cholesky(S0)\d_ ≈ λ
+LQR.copy_shur_factors!(U_,d_,λ, U)
+cholesky(S0)\d ≈ λ
+
+sol = LQRSolution(prob)
+copyto!(sol, prob.Z)
+Z0 = copy(sol.Z)
+LQR.calculate_primals!(sol, prob.obj, L, blocks)
+sol.Z
+A = conSet[2].con.A
+# sol.Z .+= Z0
+r_con = map(2:N-1) do k
+    (A*sol.X[k])[1]
+end
+norm(r_con,Inf)
 
 
-D = Diagonal(@SVector ones(40))
-Hv = view(H,1:40,1:40)
-Hv = view(H,diag(LinearIndices(H)[1:40,1:40]))
-@btime diag($Hv) .= diag($D)
-@btime copyto!($Hv, $D)
+
+# Use CholeskySolver
+prob =  DoubleIntegrator(2,11)
+n,m,N = size(prob)
+rollout!(prob)
+sol = LQRSolution(prob)
+copyto!(sol, prob.Z)
+Z0 = copy(sol.Z)
+solver = LQR.CholeskySolver(prob)
+LQR.solve!(sol, solver)
+
+sol.Z .+= Z0
+A = prob.constraints[2].con.A
+r_con = map(2:N-1) do k
+    (A*sol.X[k])[1]
+end
+norm(r_con,Inf)
+
+# Time solve
+prob =  DoubleIntegrator(2,11)
+rollout!(prob)
+sol = LQRSolution(prob)
+solver = LQR.CholeskySolver(prob)
+@btime LQR.calculate_shur_factors!($solver.shur_blocks, $solver.obj, $solver.constraint_blocks)
+@btime cholesky!($solver.chol_blocks, $solver.shur_blocks)
+@btime LQR.forward_substitution!($solver.chol_blocks)
+@btime LQR.backward_substitution!($solver.chol_blocks)
+@btime LQR.calculate_primals!($sol, $solver.obj, $solver.chol_blocks, $solver.constraint_blocks)
+
+# Test cholesky
+solver = LQR.CholeskySolver(prob)
+LQR.calculate_shur_factors!(solver.shur_blocks, solver.obj, solver.constraint_blocks)
+F = solver.shur_blocks
+L = solver.chol_blocks
+cholesky!(L,F)
+
+A = cholesky(F[1].A)
+cholesky!(L[1], F[1], A)
+a = tr(L[1].C)
+LQR.cholesky2!(L[1], F[1], A)
+tr(L[1].C) ≈ a
+@btime cholesky!($(L[1]),$(F[1]),UpperTriangular($A))
+
+A = rand(10,10)
+B = Matrix(LowerTriangular(rand(10,10)))
+A/B ≈ (B'\A')'
+B'
+LAPACK.trtrs!('L','T','N',B,A)
+@which A/B
+typeof(transpose(A))
+
+struct AAt{T}
+    A::Matrix{T}
+    At::Transpose{T,Matrix{T}}
+    AAt(A::Matrix{T}) where T = new{T}(A,transpose(A))
+end
+At = AAt(A)
+At.At[2] = 1
+@btime $At.At[3] = 3
+
+A[3] = 4
+A
+
+
+A = LQR.chol!(F[1].A)
+LQR.chol!(L[1], F[1], A)
+@btime LQR.chol!($(L[1]), $(F[1]), $A)
+
+
 
 n,m = size(prob)
 p = 1
