@@ -50,7 +50,6 @@ struct LQRSolution{n,m,T,nm}
     U::Vector{SubArray{T,1,Vector{T},Tuple{UnitRange{Int}},true}}
     X_::SubArray{T,1,Vector{T},Tuple{Vector{Int}},false}
     U_::SubArray{T,1,Vector{T},Tuple{Vector{Int}},false}
-    K::Vector{SizedMatrix{m,n,T,2}}
 end
 
 function LQRSolution(n,m,N,tf)
@@ -70,8 +69,7 @@ function LQRSolution(n,m,N,tf)
     X_ = view(Z, vcat(iX...))
     U_ = view(Z, vcat(iU...))
     push!(Z_, ViewKnotPoint(X[end], n, m, 0.0, tf))
-    K = [SizedMatrix{m,n}(zeros(m,n)) for k = 1:N-1]
-    LQRSolution(Z,Z_,X,U,X_,U_,K)
+    LQRSolution(Z,Z_,X,U,X_,U_)
 end
 
 @inline LQRSolution(prob::LQRProblem{n,m}) where {n,m} = LQRSolution(n,m, prob.N, prob.tf)
@@ -79,7 +77,7 @@ end
 
 function Base.copyto!(sol::LQRSolution, Z::Traj)
     N = length(Z)
-    for k = 1:N-1 
+    for k = 1:N-1
         sol.Z_[k].z .= Z[k].z
     end
     sol.Z_[N].z .= state(Z[N])

@@ -370,14 +370,14 @@ end
 # end
 
 function calculate_shur_factors!(F::Vector{<:BlockTriangular3},
-        obj::Objective{<:DiagonalCost}, blocks)
+        Jinv::Vector{<:InvertedQuadratic}, blocks)
     # @assert isempty(F[1].A)
     N = length(blocks)
     for k = 1:N-1
-        shur!(obj.cost[k], blocks[k])
+        shur!(Jinv[k], blocks[k])
         copy_shur!(F[k], blocks[k], blocks[k+1])
     end
-    shur!(obj.cost[N], blocks[N])
+    shur!(Jinv[N], blocks[N])
     copy_shur!(F[N], blocks[N])
     # for k = 1:N-1
     #     shur!(F[k], obj.cost[k], obj.cost[k+1], blocks[k], blocks[k+1])
@@ -386,13 +386,16 @@ function calculate_shur_factors!(F::Vector{<:BlockTriangular3},
  end
 
 function shur!(Jinv, block)
-    H,g = hessian(Jinv), gradient(Jinv)
+    # H,g = hessian(Jinv), gradient(Jinv)
+    # g = StaticKnotPoint(Jinv,q, Jinv.r)
 
-    mul!(block.YJ, block.Y, H)
-    mul!(block.YYt, block.YJ, block.Y')
+    transpose!(block.JYt, block.Y)
+    ldiv!(Jinv.chol, block.JYt)
+    # mul!(block.YJ, block.Y, H)
+    mul!(block.YYt, block.Y, block.JYt)
     YYt = block.YYt
 
-    Hg = H\g
+    g = gradient(Jinv)
     mul!(block.r, block.YJ, g)
 end
 
@@ -435,45 +438,45 @@ function copy_shur!(res::BlockUpperTriangular3{p1,ps,p2}, block) where {p1,ps,p2
     res.d .= block.d .+ block.r_[3]
 end
 
-function shur!(res::BlockTriangular3{p1,ps,p2},
-        Jinv::Union{<:DiagonalCost,<:QuadraticCost}, J2inv,
-        block::ConstraintBlock, block2::ConstraintBlock) where {p1,ps,p2}
-
-    _shur!(res, Jinv, block)
-
-    H2,g2 = hessian(J2inv), gradient(J2inv)
-    Hg = H2\g2
-    mul!(res.d, block2.D2, Hg, 1.0, 1.0)
-    # res.d .+= block2.D2*(H2\g2)
-    return nothing
-end
-
-function _shur!(res::BlockTriangular3{p1,ps,p2},
-        Jinv::Union{<:DiagonalCost,<:QuadraticCost},
-        block::ConstraintBlock) where {p1,ps,p2}
-    H,g = hessian(Jinv), gradient(Jinv)
-
-    mul!(block.YJ, block.Y, H)
-    mul!(block.YYt, block.YJ, block.Y')
-    YYt = block.YYt
-
-    ip1 = SVector{p1}(1:p1)
-    ips = SVector{ps}((1:ps) .+ p1)
-    ip2 = SVector{p2}((1:p2) .+ (p1+ps))
-
-    res.A .+= YYt[ip1,ip1]
-    res.B .= YYt[ips,ips]
-    res.C .= YYt[ip2,ip2]
-    res.D .= YYt[ips,ip1]
-    res.E .= YYt[ip2,ips]
-    res.F .= YYt[ip2,ip1]
-
-    # res.c .= block.c .+ block.C*(H\g)
-    # res.d .= block.d .+ block.D1*(H\g)
-    Hg = H*g
-    mul!(res.c, block.C, Hg)
-    res.c .+= block.c
-    mul!(res.d, block.D1, Hg)
-    res.d .+= block.d
-    return nothing
-end
+# function shur!(res::BlockTriangular3{p1,ps,p2},
+#         Jinv::Union{<:DiagonalCost,<:QuadraticCost}, J2inv,
+#         block::ConstraintBlock, block2::ConstraintBlock) where {p1,ps,p2}
+#
+#     _shur!(res, Jinv, block)
+#
+#     H2,g2 = hessian(J2inv), gradient(J2inv)
+#     Hg = H2\g2
+#     mul!(res.d, block2.D2, Hg, 1.0, 1.0)
+#     # res.d .+= block2.D2*(H2\g2)
+#     return nothing
+# end
+#
+# function _shur!(res::BlockTriangular3{p1,ps,p2},
+#         Jinv::Union{<:DiagonalCost,<:QuadraticCost},
+#         block::ConstraintBlock) where {p1,ps,p2}
+#     H,g = hessian(Jinv), gradient(Jinv)
+#
+#     mul!(block.YJ, block.Y, H)
+#     mul!(block.YYt, block.YJ, block.Y')
+#     YYt = block.YYt
+#
+#     ip1 = SVector{p1}(1:p1)
+#     ips = SVector{ps}((1:ps) .+ p1)
+#     ip2 = SVector{p2}((1:p2) .+ (p1+ps))
+#
+#     res.A .+= YYt[ip1,ip1]
+#     res.B .= YYt[ips,ips]
+#     res.C .= YYt[ip2,ip2]
+#     res.D .= YYt[ips,ip1]
+#     res.E .= YYt[ip2,ips]
+#     res.F .= YYt[ip2,ip1]
+#
+#     # res.c .= block.c .+ block.C*(H\g)
+#     # res.d .= block.d .+ block.D1*(H\g)
+#     Hg = H*g
+#     mul!(res.c, block.C, Hg)
+#     res.c .+= block.c
+#     mul!(res.d, block.D1, Hg)
+#     res.d .+= block.d
+#     return nothing
+# end

@@ -29,7 +29,7 @@ end
 
 function BlockCholesky(n::Int, m::Int; diag=false, kwargs...)
     if diag
-        BlockCholesky(Diagonal(@MMatrix zero(n+m), n,m; kwargs...))
+        BlockCholesky(Diagonal(zeros(n+m)), n,m; kwargs...)
     else
         BlockCholesky(zeros(n+m,n+m), n, m; kwargs...)
     end
@@ -47,10 +47,8 @@ function BlockCholesky(M::S, n::Int, m::Int; block_diag=false, uplo::Char='U') w
     C = view(M, iu,ix)
     Ct = view(M, ix,iu)
 
-    A_ = Cholesky(zeros(n,n),uplo,0)
-    B_ = Cholesky(zeros(m,m),uplo,0)
     F = Cholesky(M, uplo, 0)
-    BlockCholesky(M, F, A, B, C, Ct, A_, B_, block_diag, uplo)
+    BlockCholesky(M, F, A, B, C, Ct, block_diag, uplo)
 end
 
 "Take cholesky of the entire matrix"
@@ -80,8 +78,8 @@ end
 Actually computes the inverse to avoid divisions during the solve
 """
 function LinearAlgebra.cholesky!(chol::BlockCholesky{<:Any,<:Diagonal}, A::Diagonal, B::Diagonal)
-    n = size(A,1)
-    m = size(B,1)
+    n = size(chol.A,1)
+    m = size(chol.B,1)
     for i = 1:n
         chol.M.diag[i] = inv(A.diag[i])
     end
@@ -99,3 +97,61 @@ end
 
 @inline LinearAlgebra.:\(chol::BlockCholesky{<:Any,<:Diagonal}, b::AbstractVecOrMat) =
     chol.M*b
+
+
+
+
+# Cost function interface
+struct InvertedQuadratic{n,m,T,S}
+    chol::BlockCholesky{T,S}
+    q::MVector{n,T}
+    r::MVector{m,T}
+end
+
+function InvertedQuadratic(cost::DiagonalCost)
+    n = state_dim(cost)
+    m = control_dim(cost)
+    m̄ = m * !cost.terminal
+    chol = BlockCholesky(n, m̄, diag=true)
+    icost = InvertedQuadratic(chol, MVector(cost.q), MVector(cost.r))
+    update_cost!(icost, cost)
+    icost
+end
+
+function InvertedQuadratic(cost::QuadraticCost)
+    n = state_dim(cost)
+    m = control_dim(cost)
+    chol = BlockCholesky(n,m, block_diag=cost.zeroH)
+    update_cost!(icost, cost)
+    icost
+end
+
+function gradient(icost::InvertedQuadratic{<:Any,m}) where m
+    if size(icost.chol.B,1) == m
+        return [SVector(icost.q); SVector(icost.r)]
+    else  # terminal
+        return SVector(icost.q)
+    end
+end
+
+function update_cost!(icost::InvertedQuadratic, cost::QuadraticCost)
+    if cost.zeroH
+        cholesky!(icost.chol, cost.Q, cost.R)
+    else
+        cholesky!(icost.chol, cost.Q, cost.R, cost.H')
+    end
+    icost.q .= cost.q
+    icost.r .= cost.r
+end
+
+function update_cost!(icost::InvertedQuadratic, cost::DiagonalCost)
+    cholesky!(icost.chol, cost.Q, cost.R)
+    icost.q .= cost.q
+    icost.r .= cost.r
+end
+
+function update_cholesky!(chols::Vector{<:InvertedQuadratic}, obj::Objective)
+    for k in eachindex(chols)
+        update_cost!(chols[k], obj.cost[k])
+    end
+end

@@ -1,49 +1,5 @@
 include("problems.jl")
 
-prob =  DoubleIntegrator(3,11)
-
-J = Objective(TrajOptCore.QuadraticCostFunction.(prob.obj.cost))
-J = TrajOptCore.QuadraticObjective(prob.obj)
-Jinv = Objective(inv.(J))
-
-n,m,N = size(prob)
-prob.obj[N-1]
-conSet = get_constraints(prob)
-blocks = TrajOptCore.ConstraintBlocks(conSet)
-blocks[2].D1
-blocks[end-1]
-solver = LQR.CholeskySolver(prob)
-
-# evaluate!(conSet, prob.Z)
-# jacobian!(conSet, prob.Z)
-# con = LQR.link_jacobians(blocks, conSet[3], zeros(Int,N))
-# conSet[2].∇c[1]
-# con.∇c[1] .= 1;
-# blocks[2].Y[n+1,:1:n] == ones(n)
-#
-# con = LQR.link_jacobians(blocks, conSet[1], zeros(Int,N))
-# con.∇c[1] .= 3
-# blocks[1].Y[1:n,1:n] == fill(3,n,n)
-# blocks[1].Y[1:n,n .+ (1:m)] == zeros(n,m)
-#
-# con = LQR.link_jacobians(blocks, conSet[2], zeros(Int,N))
-# con.∇c[1] .= 2
-# con.∇c[1,2] .= -2
-# blocks[1].Y[end-n+1:end, :] == fill(2,n,n+m)
-# blocks[2].Y[1:n,:] == fill(-2,n,n+m)
-A = rand(10,10)
-A = A'A
-inv(A)
-LAPACK.potri!('L',A)
-LAPACK.sytri!('U', A, zeros(Int,10))
-A
-
-block = blocks[2]
-J = prob.obj[2]
-res = LQR.BlockTriangular3(n,dims(block)[2],n)
-LQR.shur!(res, J, block)
-@btime LQR.shur!($res, $J, $block)
-
 # Set up the problem
 prob =  DoubleIntegrator(2,11)
 n,m,N = size(prob)
@@ -52,20 +8,26 @@ NN = num_vars(prob)
 rollout!(prob)
 conSet = get_constraints(prob)
 
+Jinv = LQR.InvertedQuadratic.(prob.obj.cost)
+LQR.update_cholesky!(Jinv, prob.obj)
+@btime LQR.update_cholesky!($Jinv, $prob.obj)
+
 # Create Jacobian blocks
 blocks = TrajOptCore.ConstraintBlocks(conSet)
 evaluate!(blocks, prob.Z)
 jacobian!(blocks, prob.Z)
 
+
 # Create Shur factor blocks
 iobj = Objective(inv.(prob.obj.cost))
 F = LQR.build_shur_factors(blocks)
 Ft = LQR.build_shur_factors(blocks, :U)
-LQR.calculate_shur_factors!(F, iobj, blocks)
-LQR.calculate_shur_factors!(Ft, iobj, blocks)
+LQR.calculate_shur_factors!(F, Jinv, blocks)
+LQR.calculate_shur_factors!(Ft, Jinv, blocks)
 F[10].D ≈ (Ft[10].D')
 F[10].F ≈ (Ft[10].F')
 F[10].B ≈ (Ft[10].B')
+
 
 # Create full array versions
 S = zeros(P,P)
@@ -89,13 +51,13 @@ S0 = Symmetric(D*(H\D'))
 S0 ≈ S_
 
 # Calculate cholesky factorization
-LQR.calculate_shur_factors!(F, iobj, blocks)
-LQR.calculate_shur_factors!(Ft, iobj, blocks)
+LQR.calculate_shur_factors!(F, Jinv, blocks)
+LQR.calculate_shur_factors!(Ft, Jinv, blocks)
 L = LQR.build_shur_factors(blocks)
 U = LQR.build_shur_factors(blocks, :U)
 
 cholesky!(L, F)
-LQR.Ucholesky!(U, Ft)
+cholesky!(U, Ft)
 LQR.forward_substitution!(L)
 LQR.forward_substitution!(U)
 # LQR.Ucholesky!(Ft)
@@ -124,12 +86,13 @@ LQR.copy_shur_factors!(U_,d_,λ, U)
 cholesky(S0)\d ≈ λ
 
 sol = LQRSolution(prob)
+rollout!(prob)
 copyto!(sol, prob.Z)
 Z0 = copy(sol.Z)
 LQR.calculate_primals!(sol, prob.obj, L, blocks)
-sol.Z
+
 A = conSet[2].con.A
-# sol.Z .+= Z0
+sol.Z .+= Z0
 r_con = map(2:N-1) do k
     (A*sol.X[k])[1]
 end
@@ -145,8 +108,8 @@ sol = LQRSolution(prob)
 copyto!(sol, prob.Z)
 Z0 = copy(sol.Z)
 solver = LQR.CholeskySolver(prob)
-LQR.solve!(sol, solver)
-@btime LQR.solve!($sol, $solver)
+LQR._solve!(sol, solver)
+@btime LQR._solve!($sol, $solver)
 
 sol.Z .+= Z0
 A = prob.constraints[2].con.A
