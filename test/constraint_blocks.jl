@@ -1,21 +1,58 @@
+using Test
 include("problems.jl")
 
 # Set up the problem
 prob =  DoubleIntegrator(2,11)
+model = prob.model
 n,m,N = size(prob)
 P = sum(num_constraints(prob))
 NN = num_vars(prob)
 rollout!(prob)
 conSet = get_constraints(prob)
+sort!(conSet)
 
+# Calculate the inverted cost
 Jinv = LQR.InvertedQuadratic.(prob.obj.cost)
 LQR.update_cholesky!(Jinv, prob.obj)
 @btime LQR.update_cholesky!($Jinv, $prob.obj)
 
 # Create Jacobian blocks
-blocks = TrajOptCore.ConstraintBlocks(conSet)
-evaluate!(blocks, prob.Z)
-jacobian!(blocks, prob.Z)
+blocks = ConstraintBlocks(model, conSet)
+@test size(blocks[1].Y) == (2n,n+m)
+@test size(blocks[1].D2,1) == 0
+@test size(blocks[1].D1,1) == n
+@test size(blocks[N].Y) == (2n,n)
+@test size(blocks[N].D2,1) == n
+@test size(blocks[N].D1,1) == 0
+@test size(blocks[N].C,1) == conSet.p[N]
+@test size(blocks[N÷2].C,1) == conSet.p[N÷2]-n
+cinds = gen_con_inds(conSet, :by_block)
+@test cinds[1][1] == 1:4
+@test cinds[end][1] == 5:8
+@test cinds[end][2] == 2:5
+@test cinds[2][2] == 1:1
+@test cinds[3][1] == 1:4
+
+cvals = map(enumerate(zip(conSet))) do (i,(inds,con))
+    C,c = TrajOptCore.gen_convals(blocks, cinds[i], con, inds)
+    ConVal(n,m, con, inds, C, c)
+end
+cvals[1].jac[1] .= 1
+@test blocks[1].C[:,1:n] == ones(n,n)
+cvals[4].jac[1,1] .= 2
+@test blocks[1].D1 == fill(2,n,n+m)
+cvals[4].jac[2,1] .= 3
+@test blocks[2].D1 == fill(3,n,n+m)
+cvals[4].jac[1,2] .= 4
+@test blocks[2].D2 == fill(4,n,n+m)
+cvals[4].jac[end,1] .= -2
+@test blocks[end-1].D1 == fill(-2,n,n+m)
+cvals[4].jac[end,2] .= -1
+@test blocks[end].D2 == fill(-1,n,n)
+
+conSet = BlockConstraintSet(model, get_constraints(prob))
+evaluate!(conSet, prob.Z)
+jacobian!(conSet, prob.Z)
 
 
 # Create Shur factor blocks

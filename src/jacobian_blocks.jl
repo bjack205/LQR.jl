@@ -1,6 +1,7 @@
 using TrajOptCore
 import TrajOptCore: ConstraintBlocks, hessian, gradient
 
+
 # struct JacobianBlock{n,m,p,T}
 #     Ā::SizedMatrix{n,n,T,2}
 #     B̄::SizedMatrix{n,m,T,2}
@@ -162,31 +163,31 @@ import TrajOptCore: ConstraintBlocks, hessian, gradient
 #      COST FUNCTIONS       #
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~#
 
-function TrajOptCore.hessian(J::QuadraticCost{<:Diagonal{<:Any,<:SVector},<:Diagonal{<:Any,<:SVector}})
-    if sum(J.H) == 0
-        return Diagonal([J.Q.diag; J.R.diag])
-    else
-        Hx = [J.Q J.H']
-        Hu = [J.H J.R]
-        return [Hx; Hu]
-    end
-end
-
-function TrajOptCore.hessian(J::DiagonalCost)
-    if J.terminal
-        J.Q
-    else
-        Diagonal([J.Q.diag; J.R.diag])
-    end
-end
-
-function TrajOptCore.gradient(J::DiagonalCost)
-    if J.terminal
-        J.q
-    else
-        [J.q; J.r]
-    end
-end
+# function TrajOptCore.hessian(J::QuadraticCost{<:Diagonal{<:Any,<:SVector},<:Diagonal{<:Any,<:SVector}})
+#     if sum(J.H) == 0
+#         return Diagonal([J.Q.diag; J.R.diag])
+#     else
+#         Hx = [J.Q J.H']
+#         Hu = [J.H J.R]
+#         return [Hx; Hu]
+#     end
+# end
+#
+# function TrajOptCore.hessian(J::DiagonalCost)
+#     if J.terminal
+#         J.Q
+#     else
+#         Diagonal([J.Q.diag; J.R.diag])
+#     end
+# end
+#
+# function TrajOptCore.gradient(J::DiagonalCost)
+#     if J.terminal
+#         J.q
+#     else
+#         [J.q; J.r]
+#     end
+# end
 
 function build_H!(H, obj::Objective{<:Diagonal}, ::Size{sa}) where sa
     n,m = sa

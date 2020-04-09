@@ -28,9 +28,9 @@ include("lqr_problem.jl")
 include("least_squares.jl")
 include("dynamic_programming.jl")
 include("block_cholesky.jl")
-include("jacobian_blocks.jl")
+# include("jacobian_blocks.jl")
 include("constrained_problem.jl")
-include("cholesky_solve.jl")
-include("cholesky_solver.jl")
+# include("cholesky_solve.jl")
+# include("cholesky_solver.jl")
 
 end # module

@@ -29,11 +29,11 @@ function DoubleIntegrator(D=3, N=101; constrained=false)
     obj = LQRObjective(Q,R,10Q,xf,N)
 
     # Constraints
-    conSet = ConstraintSet(n,m,N)
+    conSet = ConstraintList(n,m,N)
     p = max(D-2,1) # constrain it to a plane
     A = SizedMatrix{p,n}([rand(p,D) rand(p,D)])
     b = zeros(p)
-    con = LinearConstraint{Equality,State}(n,m,A,b)
+    con = LinearConstraint(n,m,A,b,Equality(),1:n)
     add_constraint!(conSet, con, 2:N-1)
     goal = GoalConstraint(xf)
     add_constraint!(conSet, goal, N:N)
