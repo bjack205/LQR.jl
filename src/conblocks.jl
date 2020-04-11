@@ -34,16 +34,19 @@ Overall constraint Jacobian structure
 ```
 """
 struct ConstraintBlock{T,VT,MT,MV}
-    y::VT
-    Y::MT
-    YYt::Matrix{T}  # outer product => Shur compliment
-    JYt::Matrix{T}   # partial Shur compliment
+    y::VT                                            # constraint values [c; d]
+    Y::MT                                            # constraint Jacobian [D2; C; D1]
+    YYt::Matrix{T}                                   # outer product => Shur compliment
+    JYt::Matrix{T}                                   # partial Shur compliment
     YJ::Transpose{T,Matrix{T}}
-    r::Vector{T}    # Shur compliment residual
+    r::Vector{T}                                     # partial residual - Y*Jinv*g
+	r_::Vector{SubArray{T,1,VT,Tuple{UnitRange{Int}},true}}  # partitions of r: [D2; C; D1]*Jinv*g
 
-    D2::SubArray{T,2,MV,Tuple{UnitRange{Int},Base.Slice{Base.OneTo{Int}}},false}
-    C::SubArray{T,2,MV,Tuple{UnitRange{Int},Base.Slice{Base.OneTo{Int}}},false}
-    D1::SubArray{T,2,MV,Tuple{UnitRange{Int},Base.Slice{Base.OneTo{Int}}},false}
+    D2::SubArray{T,2,MV,Tuple{UnitRange{Int},Base.Slice{Base.OneTo{Int}}},false} # view of Y for prev dynamics
+    C::SubArray{T,2,MV,Tuple{UnitRange{Int},Base.Slice{Base.OneTo{Int}}},false}  # view of Y for stage cons
+    D1::SubArray{T,2,MV,Tuple{UnitRange{Int},Base.Slice{Base.OneTo{Int}}},false} # view of Y for dynamics
+	c::SubArray{T,1,VT,Tuple{UnitRange{Int}},true}   # view of y for stage constraints
+	d::SubArray{T,1,VT,Tuple{UnitRange{Int}},true}   # view of y for dynamics constraints
 end
 
 function ConstraintBlock(n1::Int, p::Int, n2::Int, w::Int)
@@ -51,13 +54,19 @@ function ConstraintBlock(n1::Int, p::Int, n2::Int, w::Int)
     Y = zeros(n1+p+n2, w)
     YYt = zeros(n1+p+n2, n1+p+n2)
     JYt = zeros(w, n1+p+n2)
-    YJ = Transpose(zeros(n1+p+n2, w))
-    r = zero(y)
+    YJ = transpose(JYt)
+    r = zeros(n1+p+n2)
+	r_ = [view(r, 1:n1), view(r, n1 .+ (1:p)), view(r, (n1+p) .+ (1:n2))]
 
     D2 = view(Y, 1:n1, :)
     C = view(Y, n1 .+ (1:p), :)
     D1 = view(Y, (n1+p) .+ (1:n2), :)
-    ConstraintBlock(y, Y, YYt, JYt, YJ, r, D2, C, D1)
+	c = view(y, 1:p)
+	d = view(y, p .+ (1:n2))
+	rc = view(r, 1:p)
+	rd = view(r, p .+ (1:n2))
+
+    ConstraintBlock(y, Y, YYt, JYt, YJ, r, r_, D2, C, D1, c, d)
 end
 
 function ConstraintBlocks(model::AbstractModel, cons::ConstraintList)
@@ -84,6 +93,22 @@ function ConstraintBlocks(model::AbstractModel, cons::ConstraintList)
     return blocks
 end
 
+dims(block::ConstraintBlock) = size(block.D2,1), size(block.C,1), size(block.D1,1)
+
+function copy_blocks!(D,d, blocks::Vector{<:ConstraintBlock})
+	off1 = 0
+	off2 = 0
+	for k in eachindex(blocks)
+		n1,p,n2 = dims(blocks[k])
+		w = size(blocks[k].Y,2)
+		i1 = off1 .+ (1:n1+p+n2)
+		i2 = off2 .+ (1:w)
+		D[i1,i2] .= blocks[k].Y
+		d[(off1+n1) .+ (1:p+n2)] .= blocks[k].y
+		off1 += n1+p
+		off2 += w
+	end
+end
 
 
 """

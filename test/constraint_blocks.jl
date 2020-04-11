@@ -1,8 +1,10 @@
 using Test
 include("problems.jl")
 
+import LQR: ConstraintBlock, ConstraintBlocks
+
 # Set up the problem
-prob =  DoubleIntegrator(2,11)
+prob = DoubleIntegrator(3,101)
 model = prob.model
 n,m,N = size(prob)
 P = sum(num_constraints(prob))
@@ -13,8 +15,10 @@ sort!(conSet)
 
 # Calculate the inverted cost
 Jinv = LQR.InvertedQuadratic.(prob.obj.cost)
+LQR.InvertedQuadratic(prob.obj.cost[end])
 LQR.update_cholesky!(Jinv, prob.obj)
-@btime LQR.update_cholesky!($Jinv, $prob.obj)
+# @btime LQR.update_cholesky!($Jinv, $prob.obj)
+
 
 # Create Jacobian blocks
 blocks = ConstraintBlocks(model, conSet)
@@ -26,12 +30,12 @@ blocks = ConstraintBlocks(model, conSet)
 @test size(blocks[N].D1,1) == 0
 @test size(blocks[N].C,1) == conSet.p[N]
 @test size(blocks[N÷2].C,1) == conSet.p[N÷2]-n
-cinds = gen_con_inds(conSet, :by_block)
-@test cinds[1][1] == 1:4
-@test cinds[end][1] == 5:8
-@test cinds[end][2] == 2:5
+cinds = LQR.gen_con_inds(conSet, :by_block)
+@test cinds[1][1] == 1:n
+@test cinds[end][1] == n .+ (1:n)
+@test cinds[end][2] == 2:n+1
 @test cinds[2][2] == 1:1
-@test cinds[3][1] == 1:4
+@test cinds[3][1] == 1:n
 
 cvals = map(enumerate(zip(conSet))) do (i,(inds,con))
     C,c = TrajOptCore.gen_convals(blocks, cinds[i], con, inds)
@@ -49,21 +53,23 @@ cvals[4].jac[end,1] .= -2
 @test blocks[end-1].D1 == fill(-2,n,n+m)
 cvals[4].jac[end,2] .= -1
 @test blocks[end].D2 == fill(-1,n,n)
+cvals[1].vals[1] .= 1.5
+@test blocks[1].c  == fill(1.5,n)
+cvals[4].vals[1] .= 2.5
+@test blocks[1].d == fill(2.5,n)
 
-conSet = BlockConstraintSet(model, get_constraints(prob))
+conSet = LQR.BlockConstraintSet(model, get_constraints(prob))
 evaluate!(conSet, prob.Z)
 jacobian!(conSet, prob.Z)
 
-
 # Create Shur factor blocks
-iobj = Objective(inv.(prob.obj.cost))
-F = LQR.build_shur_factors(blocks)
-Ft = LQR.build_shur_factors(blocks, :U)
-LQR.calculate_shur_factors!(F, Jinv, blocks)
-LQR.calculate_shur_factors!(Ft, Jinv, blocks)
-F[10].D ≈ (Ft[10].D')
-F[10].F ≈ (Ft[10].F')
-F[10].B ≈ (Ft[10].B')
+F = LQR.build_shur_factors(conSet)
+Ft = LQR.build_shur_factors(conSet, :U)
+LQR.calculate_shur_factors!(F, Jinv, conSet.blocks)
+LQR.calculate_shur_factors!(Ft, Jinv, conSet.blocks)
+@test F[10].D ≈ (Ft[10].D')
+@test F[10].F ≈ (Ft[10].F')
+@test F[10].B ≈ (Ft[10].B')
 
 
 # Create full array versions
@@ -72,29 +78,33 @@ d_ = zeros(P)
 λ = zeros(P)
 LQR.copy_shur_factors!(S, d_, λ, F)
 S_ = Symmetric(S, :L)
-d_
 
 D = zeros(P, NN)
 d = zeros(P)
-vblocks = TrajOptCore.ConstraintBlocks(D,d,blocks)
-evaluate!(vblocks, prob.Z)
-jacobian!(vblocks, prob.Z)
-d ≈ d_
+@which LQR.copy_blocks!(D, d, conSet.blocks)
+@test d ≈ d_
 
 H = zeros(NN,NN)
 LQR.build_H!(H, prob.obj)
 
 S0 = Symmetric(D*(H\D'))
-S0 ≈ S_
+@test S0 ≈ S_
 
 # Calculate cholesky factorization
-LQR.calculate_shur_factors!(F, Jinv, blocks)
-LQR.calculate_shur_factors!(Ft, Jinv, blocks)
-L = LQR.build_shur_factors(blocks)
-U = LQR.build_shur_factors(blocks, :U)
+LQR.calculate_shur_factors!(F, Jinv, conSet.blocks)
+LQR.calculate_shur_factors!(Ft, Jinv, conSet.blocks)
+L = LQR.build_shur_factors(conSet)
+U = LQR.build_shur_factors(conSet, :U)
 
+Ft[1].B
+solver.shur_blocks[1].B
+Jinv[1].chol.M
+solver.Jinv[1].chol.M
 cholesky!(L, F)
 cholesky!(U, Ft)
+U[1].B
+F[1].B
+U[1].D'U[1].D
 LQR.forward_substitution!(L)
 LQR.forward_substitution!(U)
 # LQR.Ucholesky!(Ft)
@@ -126,15 +136,25 @@ sol = LQRSolution(prob)
 rollout!(prob)
 copyto!(sol, prob.Z)
 Z0 = copy(sol.Z)
-LQR.calculate_primals!(sol, prob.obj, L, blocks)
+Z̄ = [StaticKnotPoint(z) for z in prob.Z]
+δZ = [LQR.MutableKnotPoint(n,m, (@MVector zeros(n+m)), z.dt, z.t) for z in prob.Z]
+LQR.calculate_primals!(δZ, Jinv, L, conSet.blocks)
+Z̄ .= prob.Z .+ δZ
 
-A = conSet[2].con.A
+max_violation(conSet)
+evaluate!(conSet, Z̄)
+max_violation(conSet)
+δZ[1]
+solver.δZ[1]
+
+
+cons = get_constraints(prob)
+A = cons[2].A
 sol.Z .+= Z0
 r_con = map(2:N-1) do k
     (A*sol.X[k])[1]
 end
 norm(r_con,Inf)
-
 
 
 # Use CholeskySolver

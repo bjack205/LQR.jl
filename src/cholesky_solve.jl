@@ -108,42 +108,6 @@ function forward_substitution!(L::BlockUpperTriangular3)
     # L.λ .= L.C'\L.λ
 end
 
-function backward_substitution!(L::BlockUpperTriangular3, Lprev::BlockUpperTriangular3)
-    L.λ .= L.λ .- Lprev.D*Lprev.μ .- Lprev.F*Lprev.λ
-    # L.λ .= L.C\L.λ
-    tri_solve!(L.C, L.λ, 'U')
-    L.μ .= L.μ .- L.E*L.λ
-    # L.μ .= L.B\L.μ
-    tri_solve!(L.B, L.μ, 'U')
-end
-
-function backward_substitution!(L::BlockUpperTriangular3)
-    # L.μ .= L.B\L.μ
-    tri_solve!(L.B, L.μ, 'U')
-end
-
-
-function forward_substitution!(L::Vector{<:BlockTriangular3})
-    N = length(L)
-    forward_substitution!(L[1])
-    for k = 2:N
-        forward_substitution!(L[k-1],L[k])
-    end
-end
-
-function forward_substitution!(L1::BlockTriangular3, L2::BlockTriangular3)
-    L2.μ .= L2.c .- L2.D*L1.λ
-    L2.μ .= L2.B\L2.μ
-    L2.λ .= L2.d .- L2.F*L1.λ .- L2.E*L2.μ
-    L2.λ .= L2.C\L2.λ
-end
-
-function forward_substitution!(L::BlockTriangular3)
-    L.μ .= L.B\L.c
-    L.λ .= L.d .- L.E*L.μ
-    L.λ .= L.C\L.λ
-end
-
 function backward_substitution!(L::Vector{<:BlockTriangular3})
     N = length(L)
     # Handle terminal case
@@ -153,13 +117,52 @@ function backward_substitution!(L::Vector{<:BlockTriangular3})
     end
 end
 
-function backward_substitution!(L::BlockTriangular3, Lprev::BlockTriangular3)
-    L.λ .= L.λ .- Lprev.D'*Lprev.μ .- Lprev.F'Lprev.λ
-    L.λ .= L.C'\L.λ
-    L.μ .= L.μ .- L.E'L.λ
-    L.μ .= L.B'\L.μ
+function backward_substitution!(L::BlockUpperTriangular3, Lprev::BlockUpperTriangular3)
+    L.λ .= L.λ .+ Lprev.D*Lprev.μ .+ Lprev.F*Lprev.λ
+    # L.λ .= L.C\L.λ
+    tri_solve!(L.C, L.λ, 'U')
+    L.μ .= L.μ .- L.E*L.λ
+    # L.μ .= L.B\L.μ
+    tri_solve!(L.B, L.μ, 'U')
+    L.λ .*= -1
+    L.μ .*= -1
 end
 
-function backward_substitution!(L::BlockTriangular3)
-    L.μ .= L.B'\L.μ
+function backward_substitution!(L::BlockUpperTriangular3)
+    # L.μ .= L.B\L.μ
+    tri_solve!(L.B, L.μ, 'U')
+    L.μ .*= -1
 end
+
+#
+# function forward_substitution!(L::Vector{<:BlockTriangular3})
+#     N = length(L)
+#     forward_substitution!(L[1])
+#     for k = 2:N
+#         forward_substitution!(L[k-1],L[k])
+#     end
+# end
+#
+# function forward_substitution!(L1::BlockTriangular3, L2::BlockTriangular3)
+#     L2.μ .= L2.c .- L2.D*L1.λ
+#     L2.μ .= L2.B\L2.μ
+#     L2.λ .= L2.d .- L2.F*L1.λ .- L2.E*L2.μ
+#     L2.λ .= L2.C\L2.λ
+# end
+#
+# function forward_substitution!(L::BlockTriangular3)
+#     L.μ .= L.B\L.c
+#     L.λ .= L.d .- L.E*L.μ
+# end
+
+#
+# function backward_substitution!(L::BlockTriangular3, Lprev::BlockTriangular3)
+#     L.λ .= L.λ .- Lprev.D'*Lprev.μ .- Lprev.F'Lprev.λ
+#     L.λ .= L.C'\L.λ
+#     L.μ .= L.μ .- L.E'L.λ
+#     L.μ .= L.B'\L.μ
+# end
+#
+# function backward_substitution!(L::BlockTriangular3)
+#     L.μ .= L.B'\L.μ
+# end

@@ -118,10 +118,17 @@ function InvertedQuadratic(cost::DiagonalCost)
     icost
 end
 
-function InvertedQuadratic(cost::QuadraticCost)
+function InvertedQuadratic(cost::QuadraticCost{<:Any,<:Any,<:Any,TQ,TR}) where {TQ,TR}
     n = state_dim(cost)
     m = control_dim(cost)
-    chol = BlockCholesky(n,m, block_diag=cost.zeroH)
+    m̄ = m * !cost.terminal
+    if cost.zeroH && TQ <: Diagonal && TR <: Diagonal
+        chol = BlockCholesky(n, m̄, diag=true)
+    else
+        M = zeros(n+m̄,n+m̄)
+        chol = BlockCholesky(M, n,m̄, block_diag=cost.zeroH)
+    end
+    icost = InvertedQuadratic(chol, cost.q, cost.r)
     update_cost!(icost, cost)
     icost
 end
@@ -131,6 +138,17 @@ function gradient(icost::InvertedQuadratic{<:Any,m}) where m
         return [SVector(icost.q); SVector(icost.r)]
     else  # terminal
         return SVector(icost.q)
+    end
+end
+
+function add_gradient!(z, icost::InvertedQuadratic{n,m}) where {n,m}
+    for i = 1:n
+        z[i] += icost.q[i]
+    end
+    if length(z) == n+m
+        for i = 1:m
+            z[n+i] += icost.r[i]
+        end
     end
 end
 
