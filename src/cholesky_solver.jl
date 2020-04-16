@@ -4,9 +4,9 @@ export
     CholeskySolver
 
 struct MutableKnotPoint{T,N,M,NM} <: AbstractKnotPoint{T,N,M}
-    z::MVector{NM,T}
-    _x::SubArray{T,1,MVector{NM,T}}
-    _u::SubArray{T,1,MVector{NM,T}}
+    z::SizedVector{NM,T,1}
+    _x::SubArray{T,1,Vector{T}}
+    _u::SubArray{T,1,Vector{T}}
     dt::T
     t::T
     function MutableKnotPoint(n::Int, m::Int, z::MVector,
@@ -14,8 +14,9 @@ struct MutableKnotPoint{T,N,M,NM} <: AbstractKnotPoint{T,N,M}
 		@assert length(z) == n+m
 		@assert dt >= 0
 		dt,t = promote(dt,t)
-		_x = view(z, 1:n)
-		_u = view(z, n .+ (1:m))
+		z = SizedVector{n+m}(z)
+		_x = view(z.data, 1:n)
+		_u = view(z.data, n .+ (1:m))
         new{typeof(dt),n,m,n+m}(z, _x, _u, dt, t)
     end
 end
@@ -28,7 +29,8 @@ end
 
 @inline RobotDynamics.state(z::MutableKnotPoint) = z._x
 @inline RobotDynamics.control(z::MutableKnotPoint) = z._u
-@inline get_z(z::MutableKnotPoint) = RobotDynamics.is_terminal(z) ? state(z) : z.z
+@inline get_z(z::RobotDynamics.AbstractKnotPoint) = RobotDynamics.is_terminal(z) ? state(z) : z.z
+
 
 struct CholeskySolver{n̄,n,m,n̄m,nm,T}
     model::AbstractModel

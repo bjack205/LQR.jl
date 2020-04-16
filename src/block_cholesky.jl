@@ -68,7 +68,9 @@ end
 "Take cholesky of diagonal blocks"
 function LinearAlgebra.cholesky!(chol::BlockCholesky, A, B)
     chol.A .= A
-    chol.B .= B
+    if !isempty(chol.B)
+        chol.B .= B
+    end
     LAPACK.potrf!(chol.uplo, chol.A)
     LAPACK.potrf!(chol.uplo, chol.B)
     return nothing
@@ -88,7 +90,7 @@ function LinearAlgebra.cholesky!(chol::BlockCholesky{<:Any,<:Diagonal}, A::Diago
     end
 end
 
-@inline LinearAlgebra.ldiv!(chol::BlockCholesky, b::AbstractVecOrMat) = ldiv!(chol.F, b)
+@inline LinearAlgebra.ldiv!(chol::BlockCholesky, b::AbstractVecOrMat) = ldiv!(chol.F, get_data(b))
 
 @inline LinearAlgebra.ldiv!(chol::BlockCholesky{<:Any,<:Diagonal}, b::AbstractVecOrMat) =
     b .*= chol.M.diag
@@ -108,27 +110,15 @@ struct InvertedQuadratic{n,m,T,S}
     r::MVector{m,T}
 end
 
-function InvertedQuadratic(cost::DiagonalCost)
-    n = state_dim(cost)
-    m = control_dim(cost)
+function InvertedQuadratic(cost::TrajOptCore.QuadraticCostFunction{n,m}) where {n,m}
     m̄ = m * !cost.terminal
-    chol = BlockCholesky(n, m̄, diag=true)
-    icost = InvertedQuadratic(chol, MVector(cost.q), MVector(cost.r))
-    update_cost!(icost, cost)
-    icost
-end
-
-function InvertedQuadratic(cost::QuadraticCost{<:Any,<:Any,<:Any,TQ,TR}) where {TQ,TR}
-    n = state_dim(cost)
-    m = control_dim(cost)
-    m̄ = m * !cost.terminal
-    if cost.zeroH && TQ <: Diagonal && TR <: Diagonal
+    if TrajOptCore.is_diag(cost)
         chol = BlockCholesky(n, m̄, diag=true)
     else
         M = zeros(n+m̄,n+m̄)
         chol = BlockCholesky(M, n,m̄, block_diag=cost.zeroH)
     end
-    icost = InvertedQuadratic(chol, cost.q, cost.r)
+    icost = InvertedQuadratic(chol, MVector{n}(cost.q), MVector{m}(cost.r))
     update_cost!(icost, cost)
     icost
 end
@@ -152,18 +142,12 @@ function add_gradient!(z, icost::InvertedQuadratic{n,m}) where {n,m}
     end
 end
 
-function update_cost!(icost::InvertedQuadratic, cost::QuadraticCost)
-    if cost.zeroH
+function update_cost!(icost::InvertedQuadratic, cost::TrajOptCore.QuadraticCostFunction)
+    if TrajOptCore.is_blockdiag(cost)
         cholesky!(icost.chol, cost.Q, cost.R)
     else
         cholesky!(icost.chol, cost.Q, cost.R, cost.H')
     end
-    icost.q .= cost.q
-    icost.r .= cost.r
-end
-
-function update_cost!(icost::InvertedQuadratic, cost::DiagonalCost)
-    cholesky!(icost.chol, cost.Q, cost.R)
     icost.q .= cost.q
     icost.r .= cost.r
 end

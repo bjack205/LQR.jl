@@ -11,7 +11,7 @@ using BenchmarkTools
 using SparseArrays
 import LQR: KnotPoint
 
-function DoubleIntegrator(D=3, N=101; constrained=false)
+function DoubleIntegrator(D=3, N=101; constrained=false, dense_cost=false)
     Random.seed!(1)
     model = RobotZoo.DoubleIntegrator(D)
     n,m = size(model)
@@ -26,6 +26,12 @@ function DoubleIntegrator(D=3, N=101; constrained=false)
     # Objective
     Q = Diagonal([(@SVector fill(10.0,D)); (@SVector fill(1.0,D))])
     R = Diagonal(@SVector fill(0.1,m))
+    if dense_cost
+        Q = @SMatrix rand(n,n) #SMatrix{n,n}(Q)
+        R = @SMatrix rand(m,m) #SMatrix{m,m}(R)
+        Q = Q'Q + I
+        R = R'R + I
+    end
     obj = LQRObjective(Q,R,10Q,xf,N)
 
     # Constraints

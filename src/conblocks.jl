@@ -123,8 +123,9 @@ function gen_con_inds(conSet::ConstraintList, structure=:by_knotpoint)
     numcon = length(conSet.constraints)
     conLen = length.(conSet.constraints)
 
-    cons = [[@SVector ones(Int,length(con)) for j in eachindex(conSet.inds[i])]
-		for (i,con) in enumerate(conSet.constraints)]
+    # cons = [[@SVector ones(Int,length(con)) for j in eachindex(conSet.inds[i])]
+	# 	for (i,con) in enumerate(conSet.constraints)]
+	cons = [[1:0 for j in eachindex(conSet.inds[i])] for i in 1:length(conSet)]
 
     # Dynamics and general constraints
     idx = 0
@@ -148,7 +149,7 @@ function gen_con_inds(conSet::ConstraintList, structure=:by_knotpoint)
 		end
 	elseif structure == :by_block
 		sort!(conSet)  # WARNING: may modify the input
-		idx = zeros(N)
+		idx = zeros(Int,N)
 		for k = 1:N
 			for (i,(inds,con)) in enumerate(zip(conSet))
 				if k ∈ inds

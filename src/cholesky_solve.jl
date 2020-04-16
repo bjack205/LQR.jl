@@ -90,6 +90,14 @@ function LinearAlgebra.cholesky!(U::BlockUpperTriangular3)
     return nothing
 end
 
+function forward_substitution!(L::Vector{<:BlockTriangular3})
+    N = length(L)
+    forward_substitution!(L[1])
+    for k = 2:N
+        forward_substitution!(L[k-1],L[k])
+    end
+end
+
 function forward_substitution!(L1::BlockUpperTriangular3, L2::BlockUpperTriangular3)
     L2.μ .= L2.c .- L2.D'L1.λ
     tri_solve!(L2.B, L2.μ, 'U', 'T')
@@ -134,14 +142,6 @@ function backward_substitution!(L::BlockUpperTriangular3)
     L.μ .*= -1
 end
 
-#
-# function forward_substitution!(L::Vector{<:BlockTriangular3})
-#     N = length(L)
-#     forward_substitution!(L[1])
-#     for k = 2:N
-#         forward_substitution!(L[k-1],L[k])
-#     end
-# end
 #
 # function forward_substitution!(L1::BlockTriangular3, L2::BlockTriangular3)
 #     L2.μ .= L2.c .- L2.D*L1.λ
