@@ -8,6 +8,7 @@ using LQR
 using StaticArrays
 using LinearAlgebra
 using RobotDynamics
+using BenchmarkTools
 const TO = TrajectoryOptimization
 
 if !isdefined(Main, :vis)
@@ -16,7 +17,7 @@ if !isdefined(Main, :vis)
     set_mesh!(vis, RobotZoo.DubinsCar())
 end
 
-prob, = Problems.DubinsCar(:turn90, N=11)
+prob, = Problems.DubinsCar(:turn90, N=101)
 TrajOptCore.add_dynamics_constraints!(prob)
 n,m,N = size(prob)
 NN = LQR.num_vars(prob)
@@ -25,21 +26,28 @@ Z0 = LQR.Primals(prob).Z
 
 # Build solver
 solver = LQR.SparseSolver(prob)
+@time LQR.solve!(solver)
+
+LQR.step!(solver)
 merit = TrajOptCore.L1Merit(1.0)
 ϕ = merit(solver)
 ϕ′ = TrajOptCore.derivative(merit, solver)
 ls = TrajOptCore.SimpleBacktracking()
 crit = TrajOptCore.WolfeConditions()
 
-# Take a step
-x = Z0
-solver.Z.Z .= Z0
-LQR.update!(solver)
-solver.G ≈ ∇²f(x)
-solver.g ≈ ∇f(x)
-solver.conSet.D ≈ ∇c(x)
-solver.conSet.d ≈ c(x)
+res = [zeros(n + 0*m*(k<N)) for k = 1:N]
+con = solver.conSet.convals[1]
+length(con.con)
+λ = [zeros(length(con.con)) for k in con.inds]
+TrajOptCore.norm_residual!(res, con, λ)
+@btime TrajOptCore.norm_residual!($res, $con, $λ)
 
+con.jac
+
+# Initialize
+solver.Z.Z .= Z0
+
+# Take a step
 LQR.update!(solver)
 @show max_violation(solver)
 ϕ(0)

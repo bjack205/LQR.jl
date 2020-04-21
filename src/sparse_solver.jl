@@ -135,6 +135,11 @@ struct SparseSolver{n̄,n,m,T} <: TrajOptCore.ConstrainedSolver{T}
 	Z::Primals{n,m,T}                       # primals
     Z̄::Primals{n,m,T}                       # primals (temp)
 
+	# Line Search
+	merit::TrajOptCore.MeritFunction
+	crit::TrajOptCore.LineSearchCriteria
+	ls::TrajOptCore.LineSearch
+
     DH::Transpose{T,SparseMatrixCSC{T,Int}} # Partial Shur compliment (D/H)
 
 end
@@ -191,8 +196,14 @@ function SparseSolver(prob::Problem{<:Any,T}) where T
 	for k = 1:N
 		_Z[k].z .= get_z(prob.Z[k])
 	end
+
+	# Line Search
+	merit = TrajOptCore.L1Merit(1.0)
+	ls = TrajOptCore.SimpleBacktracking()
+	crit = TrajOptCore.WolfeConditions()
+
 	SparseSolver(prob.model, prob.obj, E, J, J2, Jinv, conSet, Dblocks,
-		G, Ginv, Gblocks, g, S, r, λ, δZ, Z, Z̄, DH)
+		G, Ginv, Gblocks, g, S, r, λ, δZ, Z, Z̄, merit, crit, ls, DH)
 end
 
 @inline TrajOptCore.get_objective(solver::SparseSolver) = solver.obj
@@ -270,24 +281,51 @@ function _solve!(solver::SparseSolver)
     solver.δZ.Z .= -HD*λ - Hg
 end
 
+function step!(solver::SparseSolver)
+	merit, ls, crit = solver.merit, solver.ls, solver.crit
+	ϕ = merit(solver)
+	ϕ′ = TrajOptCore.derivative(merit, solver)
+
+	# Update the cost and constraint expansions
+	update!(solver)
+
+	# Check convergence criteria
+	feas_p = max_violation(solver, recalculate=false)
+	D = solver.conSet.D
+	g = solver.g
+	λ = solver.λ
+	feas_d = norm(g + D'λ)
+	ϵ_d = 1e-5
+	ϵ_p = 1e-5
+	@show feas_p
+	@show feas_d
+	if feas_p < ϵ_p && feas_d < ϵ_d
+		return true
+	end
+
+	# Solve the QOCP (Quadratic Optimal Control Problem)
+	_solve!(solver)
+
+	# Run the line search
+	α = TrajOptCore.line_search(ls, crit, ϕ, ϕ′)
+
+	# Save the new iterate
+	copyto!(solver.Z.Z, solver.Z̄.Z)
+
+	update!(solver)
+
+	return false
+end
+
 function solve!(solver::SparseSolver)
 	iters = 10
+	update!(solver)
+
 	for i = 1:iters
-		# Update the cost and constraint expansions
-		update!(solver)
-
-		# Check convergence criteria
-
-
-		# Solve the QOCP (Quadratic Optimal Control Problem)
-		_solve!(solver)
-
-		# Run the line search
-		α = TrajOptCore.line_search(ls, crit, ϕ, ϕ′)
-
-		# Save the new iterate
-		copyto!(solver.Z.Z, solver.Z̄.Z)
-
+		converged = step!(solver)
+		if converged
+			break
+		end
 	end
 end
 
