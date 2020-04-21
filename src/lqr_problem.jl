@@ -73,7 +73,7 @@ function Primals(n,m,N,tf)
 end
 
 @inline Primals(prob::Primals{n,m}) where {n,m} = Primals(n,m, prob.N, prob.tf)
-@inline Primals(prob::Problem) = Primals(size(prob)..., prob.tf)
+@inline Primals(prob::Problem) = begin Z = Primals(size(prob)..., prob.tf); copyto!(Z, prob.Z); Z; end
 
 function Base.copyto!(Z0::Primals, Z::Traj)
     N = length(Z)

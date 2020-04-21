@@ -55,11 +55,10 @@ function DoubleIntegrator(D=3, N=101; constrained=false, dense_cost=false)
     prob
 end
 
-function Cartpole(method=:none)
+function Cartpole(;method=:none, N = 101)
 
     model = RobotZoo.Cartpole()
     n,m = size(model)
-    N = 101
     tf = 5.
     dt = tf/(N-1)
 
@@ -87,36 +86,3 @@ function Cartpole(method=:none)
 
     return prob
 end
-# TrajectoryOptimization.add_dynamics_constraints!(prob)
-
-# # Dynamics linearization
-# A,B = linearize(RK3,model,z0)
-# Ā,B̄ = SizedMatrix{n,n}(1.0I(n)), zero(B)
-#
-# if constrained
-#     # Constraints
-#     pu = 1 # set a random direction the controls can't use
-#     p = px+pu
-#
-#     cons = map(1:N) do k
-#         if k == 1
-#             C_ = SizedMatrix{pu,n}(zeros(pu,n))
-#             D_ = SizedMatrix{pu,m}(rand(pu,m))
-#             d = SizedVector{pu}(zeros(pu))
-#         elseif k == N
-#             C_ = SizedMatrix{px,n}([rand(px,D) zeros(px,D)])
-#             D_ = SizedMatrix{px,m}(zeros(pu,m))
-#             d = SizedVector{px}(zeros(px))
-#         else
-#             C_ = SizedMatrix{p,n}([rand(px,D) zeros(px,D); zeros(pu,n)])
-#             D_ = SizedMatrix{p,m}([zeros(px,m); rand(pu,m)])
-#             d = SizedVector{p}(zeros(p))
-#         end
-#         JacobianBlock(Ā,B̄, C_,D_,d, A,B)
-#     end
-#
-#     prob = LCRProblem(obj, cons, x0, tf, N)
-# else
-#     prob = LQRProblem(10Q, Q, R, A, B, x0, u0, tf, N)
-# end
-# return prob

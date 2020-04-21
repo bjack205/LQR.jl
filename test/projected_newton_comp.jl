@@ -2,7 +2,6 @@ using MeshCat
 using TrajOptPlots
 using TrajectoryOptimization
 using RobotZoo
-using ForwardDiff
 const TO = TrajectoryOptimization
 include("problems.jl")
 
@@ -10,40 +9,13 @@ vis = Visualizer()
 open(vis)
 set_mesh!(vis, RobotZoo.Cartpole())
 
-prob = Cartpole(N=21)
+prob = Cartpole()
 ilqr = iLQRSolver(prob)
-TO.solve!(ilqr)
-visualize!(vis, ilqr)
+TrajectoryOptimization.solve!(ilqr)
 
-n,m,N = size(prob)
-Z0 = LQR.Primals(prob).Z
-zinds = [(k-1)*(n+m) .+ (1:n+m) for k = 1:N]
-zinds[end] = (N-1)*(n+m) .+ (1:n)
-
-_zinds = [SVector{length(ind)}(ind) for ind in zinds]
-function f(Z)
-	_Z = [StaticKnotPoint(prob.Z[k], Z[_zinds[k]]) for k = 1:N]
-	J = zeros(eltype(Z), N)
-	TrajOptCore.cost!(prob.obj, _Z, J)
-	return sum(J)
-end
-
-∇f(Z) = ForwardDiff.gradient(f, Z0)
-∇²f(Z) = ForwardDiff.hessian(f, Z0)
-
-function c(Z)
-	_Z = [StaticKnotPoint(prob.Z[k], Z[_zinds[k]]) for k = 1:N]
-	val = state(_Z[1]) - prob.x0
-	for k = 1:N-1
-		dyn = discrete_dynamics(RK3, prob.model, _Z[k]) - state(_Z[k+1])
-		val = [val; dyn]
-	end
-	return val
-end
-c(Z0)
-
-ForwardDiff.jacobian(c, Z0)
-
+solver = LQR.SparseSolver(prob)
+pn = ProjectedNewtonSolver(prob)
+pn.opts.verbose = true
 
 TO.solve!(pn)
 @which cost_expansion!(pn)

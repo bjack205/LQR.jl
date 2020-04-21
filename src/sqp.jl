@@ -47,9 +47,9 @@ c(xstar)[1]
 f(xstar)
 norm(∇f(xstar) + ∇c(xstar)'λstar)
 
-plot_prob(xstar)
 x_uncon = -Q\q
 plot_prob(x_uncon)
+plot_prob(xstar)
 
 # merit function
 μ = 1.0
@@ -66,23 +66,23 @@ K(x) = begin
 end
 r(x) = -[∇f(x) + ∇c(x)'λ; c(x)]
 
+r2(x) = -[∇f(x); c(x)]
 
 # Line search
-function line_search(ϕ, ϕ′, x, dx)
+function line_search(ϕ, ϕ′, x, dx, λ, dλ)
     α = 1.0
 	η = 1e-4
     ρ = 0.5
     for i = 1:10
         if ϕ(x + α*dx) ≤ ϕ(x) + η*α*ϕ′(x, dx)
 			println("α = $α")
-			return x + α*dx
+			return x + α*dx, λ + α*dλ
 		elseif α == 1
 			println("trying second-order correction")
-			A = ∇c(x)
 			dx̂ = -A'*((A*A')\c(x + dx))
 			if ϕ(x + dx + dx̂) < ϕ(x) + η*ϕ′(x, dx)
 				println("success")
-				return x + dx + dx̂
+				return x + dx + dx̂, λ + dλ
 			else
 				α *= ρ
 			end
@@ -102,13 +102,33 @@ x = x0
 dx = zero(x)
 plot_prob(x0)
 
+# Only use ∇f in rhs
+norm(c(x),Inf)
+dy = K(x)\r2(x)
+dx = dy[1:2]
+dλ = dy[3:3] - λ
+x,λ = line_search(ϕ, ϕ′, x, dx, λ, dλ)
+plot_prob(x)
+norm(λstar- λ)
+norm(xstar - x)
 
+# Newton step (these two are both equivalent)
+norm(c(x),Inf)
 dy = K(x)\r(x)
 dx = dy[1:2]
 dλ = dy[3:3]
-norm(c(x),Inf)
-x = line_search(ϕ, ϕ′, x, dx)
+x,λ = line_search(ϕ, ϕ′, x, dx, λ, dλ)
 plot_prob(x)
+norm(λstar- λ)
+norm(xstar - x)
+
+d = c(x + dx) - ∇c(x)*dx
+r_ = -[∇f(x); d]
+dŷ = K(x)\r_
+dx̂ = dŷ[1:2]
+A = ∇c(x)
+dx̂ = -A'*((A*A')\c(x + dx))
+
 
 norm(x - xstar)
 

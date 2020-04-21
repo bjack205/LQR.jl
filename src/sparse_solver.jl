@@ -248,7 +248,9 @@ function _solve!(solver::SparseSolver)
 	D,d = solver.conSet.D, solver.conSet.d
 	Z,λ = solver.Z.Z, solver.λ
 	P,NN = size(D)
-	g = -g
+	# K = [H D'; D zeros(P,P)]
+	# r = -[g; d]
+	# return K\r
 
 	LQR.calc_Ginv!(solver)
 	HD = solver.Ginv*D'
