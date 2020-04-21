@@ -29,8 +29,7 @@ end
 
 @inline RobotDynamics.state(z::MutableKnotPoint) = z._x
 @inline RobotDynamics.control(z::MutableKnotPoint) = z._u
-@inline get_z(z::RobotDynamics.AbstractKnotPoint) = RobotDynamics.is_terminal(z) ? state(z) : z.z
-
+import RobotDynamics.get_z
 
 struct CholeskySolver{n̄,n,m,n̄m,nm,T}
     model::AbstractModel

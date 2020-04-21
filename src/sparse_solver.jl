@@ -1,4 +1,5 @@
 using TrajOptCore
+using BenchmarkTools
 
 using SuiteSparse
 struct SparseConstraintSet{T} <: TrajOptCore.AbstractConstraintSet
@@ -13,6 +14,10 @@ end
 
 function SparseConstraintSet(model::AbstractModel, cons::ConstraintList,
 		jac_structure=:by_knotpoint)
+	if !TrajOptCore.has_dynamics_constraint(cons)
+		throw(ArgumentError("must contain a dynamics constraint"))
+	end
+
 	n,m = size(model)
 	n̄ = RobotDynamics.state_diff_size(model)
 	ncon = length(cons)
@@ -109,7 +114,7 @@ end
 
 TrajOptCore.is_blockdiag(cost::QuadraticViewCost) = cost.zeroH
 
-struct SparseSolver{n̄,n,m,T}
+struct SparseSolver{n̄,n,m,T} <: TrajOptCore.ConstrainedSolver{T}
     model::AbstractModel
     obj::Objective
     E::Objective{QuadraticViewCost{n,m,T}}
@@ -126,10 +131,9 @@ struct SparseSolver{n̄,n,m,T}
     S::Symmetric{T,SparseMatrixCSC{T,Int}}  # Shur compliment D*(H\D')
     r::Vector{T}                            # Shur compliment residual
     λ::Vector{T}                            # Lagrange multipliers
-    δZ::Vector{T}                           # primal step
-    Z::Vector{T}                            # primals
-    Z̄::Vector{T}                            # primals (temp)
-	_Z::Vector{ViewKnotPoint{T,n,m}}        # trajectory
+    δZ::Primals{n,m,T}                      # primal step
+	Z::Primals{n,m,T}                       # primals
+    Z̄::Primals{n,m,T}                       # primals (temp)
 
     DH::Transpose{T,SparseMatrixCSC{T,Int}} # Partial Shur compliment (D/H)
 
@@ -172,27 +176,51 @@ function SparseSolver(prob::Problem{<:Any,T}) where T
 	S = Symmetric(spzeros(P,P))
 	r = zeros(P)
 	λ = zeros(P)
-	δZ = zeros(NN)
-	Z = zeros(NN)
-	Z̄ = zeros(NN)
+
+	# Primals
+	δZ = Primals(prob)
+	Z = Primals(prob)
+	Z̄ = Primals(prob)
+	copyto!(Z, prob.Z)
 
 	iz = 1:n+m
-    _Z = [ViewKnotPoint(view(Z, iz .+ (k-1)*(n+m)), n, m, prob.Z[k].dt, prob.Z[k].t) for k = 1:N-1]
-    push!(_Z, ViewKnotPoint(view(Z, NN-n+1:NN), n, m, 0.0, prob.tf))
+    _Z = [ViewKnotPoint(view(Z.Z, iz .+ (k-1)*(n+m)), n, m, prob.Z[k].dt, prob.Z[k].t) for k = 1:N-1]
+    push!(_Z, ViewKnotPoint(view(Z.Z, NN-n+1:NN), n, m, 0.0, prob.tf))
 
 	DH = transpose(spzeros(NN,P))
 	for k = 1:N
 		_Z[k].z .= get_z(prob.Z[k])
 	end
 	SparseSolver(prob.model, prob.obj, E, J, J2, Jinv, conSet, Dblocks,
-		G, Ginv, Gblocks, g, S, r, λ, δZ, Z, Z̄, _Z, DH)
+		G, Ginv, Gblocks, g, S, r, λ, δZ, Z, Z̄, DH)
 end
 
-function update!(solver::SparseSolver)
-	evaluate!(solver.conSet, solver._Z)
-	jacobian!(solver.conSet, solver._Z)
-	cost_expansion!(solver.E, solver.obj, solver._Z)
-	cost_expansion!(solver.J2, solver.obj, solver._Z)
+@inline TrajOptCore.get_objective(solver::SparseSolver) = solver.obj
+@inline TrajOptCore.get_cost_expansion(solver::SparseSolver) = solver.J
+@inline TrajOptCore.get_solution(solver::SparseSolver) = solver.Z  # current estimate
+@inline TrajOptCore.get_step(solver::SparseSolver) = solver.δZ
+@inline TrajOptCore.get_constraints(solver::SparseSolver) = solver.conSet
+
+@inline TrajOptCore.get_primals(solver::SparseSolver) = solver.Z̄   # z + α⋅dz
+function TrajOptCore.get_primals(solver::SparseSolver, α)
+	Z̄ = vect(solver.Z̄)
+	Z = vect(solver.Z)
+	dZ = vect(solver.δZ)
+
+	Z̄ .= Z
+	BLAS.axpy!(α, dZ, Z̄)
+	return solver.Z̄
+end
+
+@inline TrajOptCore.cost(solver::SparseSolver, Z::Primals) = cost(solver, traj(Z))
+@inline TrajOptCore.evaluate!(conSet::TrajOptCore.AbstractConstraintSet, Z::Primals) = evaluate!(conSet, traj(Z))
+
+function update!(solver::SparseSolver, Z = solver.Z)
+	Z = Z.Z_
+	evaluate!(solver.conSet, Z)
+	jacobian!(solver.conSet, Z)
+	cost_expansion!(solver.E, solver.obj, Z)
+	cost_expansion!(solver.J2, solver.obj, Z)
 	update_cholesky!(solver.Jinv, solver.J)
 end
 
@@ -218,6 +246,9 @@ end
 function _solve!(solver::SparseSolver)
 	H,g = solver.G, solver.g
 	D,d = solver.conSet.D, solver.conSet.d
+	Z,λ = solver.Z.Z, solver.λ
+	P,NN = size(D)
+	g = -g
 
 	LQR.calc_Ginv!(solver)
 	HD = solver.Ginv*D'
@@ -229,8 +260,87 @@ function _solve!(solver::SparseSolver)
 	# HD = solver.DH.parent
 	# Hg = solver.δZ
 	S = D*HD
-    r = D*Hg - d
+    # r = D*Hg - d
+	r = d - D*Hg
+	# r = -d
     λ = Symmetric(S)\r
-    solver.δZ .= HD*λ - Hg
+	solver.λ .= λ
+    solver.δZ.Z .= -HD*λ - Hg
+end
 
+function solve!(solver::SparseSolver)
+	iters = 10
+	for i = 1:iters
+		# Update the cost and constraint expansions
+		update!(solver)
+
+		# Check convergence criteria
+
+
+		# Solve the QOCP (Quadratic Optimal Control Problem)
+		_solve!(solver)
+
+		# Run the line search
+		α = TrajOptCore.line_search(ls, crit, ϕ, ϕ′)
+
+		# Save the new iterate
+		copyto!(solver.Z.Z, solver.Z̄.Z)
+
+	end
+end
+
+function norm_grad(solver::SparseSolver)
+	∇f = norm(solver.g)
+
+end
+
+function gradient(solver::SparseSolver)
+
+end
+
+
+function l1merit(solver::SparseSolver, Zp::Primals{n,m,T}=solver.Z, μ=1.0) where {n,m,T}
+	Z = traj(Zp)
+	J = TrajOptCore.get_J(solver.obj)::Vector{T}
+	TrajOptCore.cost!(solver.obj, Z)
+	evaluate!(solver.conSet, Z)
+	c = TrajOptCore.norm_violation(solver.conSet)::T
+	sum(J) + μ*c
+end
+
+function l1grad(solver::SparseSolver, Zp::Primals=solver.Z, dZ=solver.δZ, μ=1.0)
+	Z = traj(Zp)
+	D,d = solver.conSet.D, solver.conSet.d
+	TrajOptCore.cost_gradient!(solver.J, solver.obj, Z)
+	jacobian!(solver.conSet, Z)
+
+	J = dot(solver.g, vect(dZ))
+	mul!(solver.r, D, vect(dZ))
+	c1 = μ*TrajOptCore.norm_dgrad(d, solver.r, 1)
+	return J + c1
+end
+
+function l1grad(J::Objective, obj::Objective, conSet, Z::Traj)
+	TrajOptCore.cost_gradient!(J, obj, Z)
+	jacobian!(conSet, Z)
+end
+
+function line_search(solver::SparseSolver, merit)
+
+	ϕ = merit(solver)
+	ϕ′ = TrajOptCore.derivative(merit, solver)
+
+	crit = TrajOptCore.WolfeConditions()
+	TrajOptCore.sufficient_decrease(crit, ϕ, ϕ′, 1.0)
+	# @btime TrajOptCore.sufficient_decrease($crit, $ϕ, $ϕ′, 1.0, true)
+	# @btime TrajOptCore.curvature($crit, $ϕ, $ϕ′, 1.0, true)
+	@btime $crit($ϕ, $ϕ′, 1.0, true)
+end
+
+function dgrad(J::Objective, obj::Objective, Z::Traj, dZ::Traj)
+	# Calculate the cost gradient, storing in J
+	TrajOptCore.cost_gradient!(J, obj, Z)
+
+	# Calculate the direction derivative of the cost in the direction dZ
+	dgrad(J, dZ)
 end

@@ -111,32 +111,3 @@ cost(solver.obj, solver.Z̄)
 
 @btime LQR.update!($solver)
 @btime LQR._solve!($solver)
-
-struct MyMerit
-    obj::Objective
-    conSet::TrajOptCore.AbstractConstraintSet
-end
-
-function TrajOptCore.evaluate!(merit::MyMerit, Z::Traj)
-    TrajOptCore.cost!(merit.obj, Z)
-    J = TrajOptCore.get_J(merit.obj)::Vector{Float64}
-
-    evaluate!(merit.conSet, Z)
-    sum(J)
-end
-
-
-merit = MyMerit(prob.obj, solver.conSet)
-evaluate!(merit, prob.Z)
-@btime evaluate!($merit, $(prob.Z))
-@btime TrajOptCore.cost!($prob.obj, $prob.Z)
-@btime TrajOptCore.stage_cost($(prob.obj.cost[1]), $(prob.Z[1]))
-costfun = QuadraticCost(Diagonal(@SVector ones(6)), Diagonal(@SVector ones(3)))
-@btime TrajOptCore.stage_cost($costfun, $(prob.Z[1]))
-
-dz = solver.δZ[2]
-z = solver.Z[2]
-Z0 = [StaticKnotPoint(z, z.z) for z in solver.Z]
-Z = solver.Z
-dZ = solver.Z̄
-@btime $Z0 .= $Z .+ $dZ

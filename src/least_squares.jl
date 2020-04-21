@@ -155,7 +155,7 @@ function build_toeplitz(T, L, A, B, tmpA=copy(A), tmpB=copy(B))
     end
 end
 
-function solve!(sol::LQRSolution, solver::LeastSquaresSolver, prob::LQRProblem)
+function solve!(sol::Primals, solver::LeastSquaresSolver, prob::LQRProblem)
     H,y = solver.H, solver.y
     A,b = solver.Ā, solver.b̄
     if solver.opts[:matbuild] == :Ab
@@ -189,9 +189,12 @@ function solve!(sol::LQRSolution, solver::LeastSquaresSolver, prob::LQRProblem)
     return nothing
 end
 
-@inline RobotDynamics.rollout!(sol::LQRSolution, prob::LQRProblem) =
+@inline traj(Z::Primals) = Z.Z_
+@inline vect(Z::Primals) = Z.Z
+
+@inline RobotDynamics.rollout!(sol::Primals, prob::LQRProblem) =
     rollout!(sol, prob.A, prob.B, prob.x0)
-function RobotDynamics.rollout!(sol::LQRSolution, A, B, x0)
+function RobotDynamics.rollout!(sol::Primals, A, B, x0)
     sol.X[1] .= x0
     for k in eachindex(sol.U)
         sol.X[k+1] .= A * sol.X[k] + B * sol.U[k]

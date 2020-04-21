@@ -43,7 +43,7 @@ function ViewKnotPoint(z::SubArray, n, m, dt, t=0.0)
     ViewKnotPoint(z, ix, iu, dt, t)
 end
 
-struct LQRSolution{n,m,T}
+struct Primals{n,m,T}
     Z::Vector{T}
     Z_::Vector{ViewKnotPoint{T,n,m}}
     X::Vector{SubArray{T,1,Vector{T},Tuple{UnitRange{Int}},true}}
@@ -52,7 +52,7 @@ struct LQRSolution{n,m,T}
     U_::SubArray{T,1,Vector{T},Tuple{Vector{Int}},false}
 end
 
-function LQRSolution(n,m,N,tf)
+function Primals(n,m,N,tf)
     dt = tf/(N-1)
     NN = N*n + (N-1)*m
     Z = zeros(NN)
@@ -69,16 +69,38 @@ function LQRSolution(n,m,N,tf)
     X_ = view(Z, vcat(iX...))
     U_ = view(Z, vcat(iU...))
     push!(Z_, ViewKnotPoint(X[end], n, m, 0.0, tf))
-    LQRSolution(Z,Z_,X,U,X_,U_)
+    Primals(Z,Z_,X,U,X_,U_)
 end
 
-@inline LQRSolution(prob::LQRProblem{n,m}) where {n,m} = LQRSolution(n,m, prob.N, prob.tf)
-@inline LQRSolution(prob::Problem) = LQRSolution(size(prob)..., prob.tf)
+@inline Primals(prob::Primals{n,m}) where {n,m} = Primals(n,m, prob.N, prob.tf)
+@inline Primals(prob::Problem) = Primals(size(prob)..., prob.tf)
 
-function Base.copyto!(sol::LQRSolution, Z::Traj)
+function Base.copyto!(Z0::Primals, Z::Traj)
     N = length(Z)
     for k = 1:N-1
-        sol.Z_[k].z .= Z[k].z
+        Z0.Z_[k].z .= Z[k].z
     end
-    sol.Z_[N].z .= state(Z[N])
+    Z0.Z_[N].z .= state(Z[N])
 end
+
+@inline Base.copyto!(Z0::Primals, Z::Vector{<:Real}) = copyto!(Z0.Z, Z)
+function Base.copy(Z::Primals{n,m}) where {n,m}
+    tf = traj(Z)[end].t
+    Z_ = Primals(n,m, length(traj(Z)), tf)
+    copyto!(Z_, vect(Z))
+    return Z_
+end
+
+function Base.:+(Z1::Primals, Z2::Primals)
+    Z = copy(Z1)
+    Z.Z .= Z1.Z .+ Z2.Z
+    return Z
+end
+
+function Base.:*(a::Real, Z1::Primals)
+    Z = copy(Z1)
+    Z.Z .= a*Z1.Z
+    return Z
+end
+
+@inline RobotDynamics.Traj(Z::Primals) = Z.Z_

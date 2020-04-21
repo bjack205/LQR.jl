@@ -8,7 +8,7 @@ using SparseArrays
 
 abstract type AbstractSolver end
 
-import TrajOptCore: num_constraints, dims
+import TrajOptCore: num_constraints
 
 export
     LQRProblem,
@@ -26,7 +26,7 @@ export
 
 include("lqr_problem.jl")
 include("least_squares.jl")
-include("dynamic_programming.jl")
+# include("dynamic_programming.jl")
 include("conblocks.jl")
 include("block_cholesky.jl")
 include("jacobian_blocks.jl")

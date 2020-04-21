@@ -1,7 +1,4 @@
 using TrajOptCore
-import TrajOptCore: ConstraintBlocks, hessian, gradient
-
-import LQR: InvertedQuadratic, gradient
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~#
 #      COST FUNCTIONS       #

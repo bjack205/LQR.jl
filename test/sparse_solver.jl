@@ -1,7 +1,10 @@
 using SuiteSparse
+using ForwardDiff
+import LQR: Primals
+
 include("problems.jl")
 
-prob = DoubleIntegrator(3,101, dense_cost=true)
+prob = DoubleIntegrator(3,101, dense_cost=false)
 rollout!(prob)
 
 n,m,N = size(prob)
@@ -72,9 +75,11 @@ g[n .+ (1:m)] == prob.obj[1].r*dt
 # Build solver
 solver0 = CholeskySolver(prob)
 LQR.update!(solver0)
+solver0.conSet.convals[1].vals
 
 solver = LQR.SparseSolver(prob)
 LQR.update!(solver)
+
 solver.conSet.D ≈ D
 solver.conSet.d ≈ d
 
@@ -99,19 +104,211 @@ inds = solver.Dblocks[2].indices
 (solver.conSet.D')[inds[2],inds[1]] ≈ solver.Dblocks[2]'
 
 LQR.calc_Ginv!(solver)
-solver.Ginv*solver.Z ≈ solver.G\solver.Z
+solver.Ginv*solver.Z.Z ≈ solver.G\solver.Z.Z
 nnz(solver.Ginv) == NN
-@btime LQR.calc_Ginv!($solver)
+# @btime LQR.calc_Ginv!($solver)
 
-LQR.calc_DH!(solver)
-@btime LQR.calc_DH!($solver)
-solver.DH.parent ≈ G\D'
-solver.δZ ≈ G\g
+# LQR.calc_DH!(solver)
+# @btime LQR.calc_DH!($solver)
+# solver.DH.parent ≈ G\D'
+# solver.δZ ≈ G\g
 
-dz = LQR._solve!(solver)
+LQR._solve!(solver)
 LQR._solve!(solver0)
 dz0 = LQR.get_step(solver0)
+dz = solver.δZ.Z
 dz ≈ dz0
+##
 
 @btime LQR._solve!($solver)
 @btime LQR._solve!($solver0)
+
+z = prob.Z[1]
+initial_trajectory!(solver, prob.Z)
+merit = TrajOptCore.L1Merit(1.0)
+ϕ = merit(solver)
+ϕ′ = TrajOptCore.derivative(merit, solver)
+ls = TrajOptCore.SimpleBacktracking()
+crit = TrajOptCore.WolfeConditions()
+
+LQR.update!(solver)
+ϕ(0)
+ϕ′(0)
+norm(solver.g - solver.conSet.D'solver.λ)
+max_violation(solver)
+LQR._solve!(solver)
+TrajOptCore.line_search(ls, crit, ϕ, ϕ′)
+copyto!(solver.Z.Z, solver.Z̄.Z)
+
+ϕ(0)
+ϕ′(0)
+LQR.update!(solver)
+norm(solver.g + solver.conSet.D'solver.λ)
+solver.g
+
+Z = copy(solver.Z)
+dZ = copy(solver.δZ)
+
+l1 = TrajOptCore.L1Merit(1.0)
+LQR.l1merit(solver)
+l1(solver, 0)
+
+LQR.l1grad(solver)
+TrajOptCore.derivative(l1, solver, 0)
+
+LQR.line_search(solver, l1)
+solver.Z̄.Z == solver.Z.Z .+ solver.δZ.Z
+
+solver.g + solver.conSet.D'solver.λ
+
+@btime LQR.l1merit($solver)
+@btime $l1($solver, 0)
+@btime LQR.l1grad($solver)
+@btime TrajOptCore.derivative($l1, $solver, 0)
+
+TrajOptCore.norm_grad(solver.J, 1)
+@btime TrajOptCore.norm_grad($solver.J, 2)
+@btime norm($solver.g, 2)
+
+
+# Check gradient with ForwardDiff
+_zinds = [SVector{length(ind)}(ind) for ind in zinds]
+function mycost(Z)
+	_Z = [StaticKnotPoint(prob.Z[k], Z[_zinds[k]]) for k = 1:N]
+	J = zeros(eltype(Z), N)
+	TrajOptCore.cost!(prob.obj, _Z, J)
+	return sum(J)
+end
+x = copy(solver.Z)
+p = copy(solver.δZ)
+mycost(x.Z) ≈ cost(solver.obj, solver.Z.Z_)
+cost_gradient!(solver.J, solver.obj, solver.Z.Z_)
+ForwardDiff.gradient(mycost, x.Z) ≈ solver.g
+TrajOptCore.dgrad(solver.J, p.Z_) ≈ solver.g'p.Z
+
+# Check directional derivative of cost with finite diff
+t = 1e-8
+f0 = LQR.l1merit(solver, x, 0)
+f0 ≈ mycost(x.Z)
+(x + t*p).Z ≈ (x.Z + t*p.Z)
+f1 = LQR.l1merit(solver, x + t*p, 0)
+(f1-f0)/t
+abs(LQR.l1grad(solver, solver.Z, solver.δZ, 0) - (f1-f0)/t) < 1e-4
+
+# Check
+Z = copy(solver.Z)
+dZ = copy(solver.δZ)
+mul!(solver.r, D, p.Z)
+TrajOptCore.norm_dgrad(d, solver.r) ≈ TrajOptCore.norm_dgrad(solver.conSet, dZ.Z_)
+@btime LQR.l1grad($solver, $Z, $dZ)
+@btime TrajOptCore.norm_dgrad($solver.conSet, $dZ.Z_)
+
+l1(solver)
+TrajOptCore.derivative(l1, solver)
+LQR.line_search(solver, l1)
+f0 = LQR.l1merit(solver, x)
+f1 = LQR.l1merit(solver, x + t*p)
+(f1-f0)/t
+TrajOptCore.norm_violation(solver.conSet)
+LQR.l1grad(solver)
+solver.conSet.d
+
+Z = LQR.Primals(prob)
+copyto!(Z, prob.Z)
+dZ = LQR.Primals(prob)
+copyto!(dZ, solver.δZ)
+
+struct MySolverWrapper{S}
+	solver::S
+end
+
+mutable struct MeritFun{n,m,T}
+	merit::Function
+	dgrad::Function
+	x0::Primals{n,m,T}
+	p::Primals{n,m,T}
+	x::Primals{n,m,T}
+	α::T
+end
+
+function update!(ϕ::MeritFun, α)
+	if α ≈ 0
+		return ϕ.x0
+	elseif !(α ≈ ϕ.α)
+		ϕ.x.Z .= ϕ.x0.Z .+ α*ϕ.p.Z  # calculate new candidate
+		ϕ.α = α
+	end
+	return ϕ.x
+end
+
+function (ϕ::MeritFun)(α::Real)
+	x = update!(ϕ, α)
+	ϕ.merit(x)
+end
+
+function deriv(ϕ::MeritFun, α::Real)
+	x = update!(ϕ, α)
+	ϕ.dgrad(x)
+end
+
+
+Z = copy(solver.Z)
+dZ = copy(solver.δZ)
+
+meritfun(x) = LQR.l1merit(solver, x)
+deriv(x) = LQR.l1grad(solver, x)
+merit = MeritFun(meritfun, deriv, Z, dZ, Primals(prob), 1.0)
+merit(0)
+merit(1)
+deriv(merit, 1)
+LQR.dgrad(solver.J, dZ.Z_)
+solver.J.J
+cost_gradient!(solver.J, solver.obj, solver.Z.Z_)
+dZ.Z
+
+struct L1Merit{C}
+    obj::Objective
+    conSet::C
+	μ::Float64
+end
+
+function TrajOptCore.evaluate!(merit::L1Merit, Z::Traj)
+    TrajOptCore.cost!(merit.obj, Z)
+    J = TrajOptCore.get_J(merit.obj)::Vector{Float64}
+
+    evaluate!(merit.conSet, Z)
+	c = TrajOptCore.norm_violation(merit.conSet, 1)::Float64
+    sum(J) + c
+end
+
+function dgrad(merit::L1Merit, Z::Traj, dz)
+	D,d = merit.conSet.D, solver.conSet.d
+end
+
+merit = MyMerit(prob.obj, solver.conSet, 1.0)
+evaluate!(merit, prob.Z)
+Z = prob.Z
+@btime evaluate!($merit, $Z)
+TrajOptCore.norm_violation(merit.conSet, 1)
+
+struct BacktrackSimple
+end
+
+function line_search(ls::BacktrackSimple, merit, x, p)
+
+end
+
+struct Wolfe{T}
+	c1::T
+	c2::T
+end
+
+function sufficient_decrease(condition::Wolfe, merit, x0, p, α)
+	x = x0 .+ α*p
+	merit(x) ≤ merit(x0) + condition.c1*α*dgrad(merit, x0, p)
+end
+
+function curvature(condition::Wolfe, merit, x0, p, α)
+	x = x0 .+ α*p
+	dgrad(merit, x, p) ≥ condition.c2*dgrad(merit, x0, p)
+end
