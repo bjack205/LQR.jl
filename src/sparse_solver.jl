@@ -51,6 +51,10 @@ end
 @inline TrajOptCore.get_convals(conSet::SparseConstraintSet) = conSet.convals
 @inline TrajOptCore.get_errvals(conSet::SparseConstraintSet) = conSet.errvals
 
+function norm_violation(conSet::SparseConstraintSet, p=2)
+	norm(conSet.d, p)
+end
+
 struct QuadraticViewCost{n,m,T} <: TrajOptCore.QuadraticCostFunction{n,m,T}
 	Q::SubArray{T,2,SparseMatrixCSC{T,Int},Tuple{UnitRange{Int},UnitRange{Int}},false}
 	R::SubArray{T,2,SparseMatrixCSC{T,Int},Tuple{UnitRange{Int},UnitRange{Int}},false}
@@ -198,8 +202,8 @@ function SparseSolver(prob::Problem{<:Any,T}) where T
 	end
 
 	# Line Search
-	merit = TrajOptCore.L1Merit(1.0)
-	ls = TrajOptCore.SimpleBacktracking()
+	merit = TrajOptCore.L1Merit()
+	ls = TrajOptCore.SecondOrderCorrector()
 	crit = TrajOptCore.WolfeConditions()
 
 	SparseSolver(prob.model, prob.obj, E, J, J2, Jinv, conSet, Dblocks,
@@ -283,8 +287,6 @@ end
 
 function step!(solver::SparseSolver)
 	merit, ls, crit = solver.merit, solver.ls, solver.crit
-	ϕ = merit(solver)
-	ϕ′ = TrajOptCore.derivative(merit, solver)
 
 	# Update the cost and constraint expansions
 	update!(solver)
@@ -303,11 +305,15 @@ function step!(solver::SparseSolver)
 		return true
 	end
 
+	# Update merit penalty
+	TrajOptCore.update_penalty!(merit, solver)
+
 	# Solve the QOCP (Quadratic Optimal Control Problem)
 	_solve!(solver)
 
 	# Run the line search
-	α = TrajOptCore.line_search(ls, crit, ϕ, ϕ′)
+	α = TrajOptCore.line_search(ls, crit, merit, solver)
+	@show α
 
 	# Save the new iterate
 	copyto!(solver.Z.Z, solver.Z̄.Z)
@@ -329,58 +335,45 @@ function solve!(solver::SparseSolver)
 	end
 end
 
-function norm_grad(solver::SparseSolver)
-	∇f = norm(solver.g)
-
+function TrajOptCore.cost_dgrad(solver::SparseSolver, Z=TrajOptCore.get_primals(solver),
+		dZ=TrajOptCore.get_step(solver); recalculate=true)
+	if recalculate
+		E = TrajOptCore.get_cost_expansion(solver)
+		obj = get_objective(solver)
+		cost_gradient!(E, obj, Z.Z_)
+	end
+	solver.g'dZ.Z
 end
 
-function gradient(solver::SparseSolver)
-
-end
-
-
-function l1merit(solver::SparseSolver, Zp::Primals{n,m,T}=solver.Z, μ=1.0) where {n,m,T}
-	Z = traj(Zp)
-	J = TrajOptCore.get_J(solver.obj)::Vector{T}
-	TrajOptCore.cost!(solver.obj, Z)
-	evaluate!(solver.conSet, Z)
-	c = TrajOptCore.norm_violation(solver.conSet)::T
-	sum(J) + μ*c
-end
-
-function l1grad(solver::SparseSolver, Zp::Primals=solver.Z, dZ=solver.δZ, μ=1.0)
-	Z = traj(Zp)
+function TrajOptCore.norm_dgrad(solver::SparseSolver, Z=TrajOptCore.get_primals(solver),
+		dZ=TrajOptCore.get_step(solver); recalculate=true, p=1)
+    conSet = get_constraints(solver)
+	if recalculate
+		Z_ = Z.Z_
+		evaluate!(conSet, Z_)
+		jacobian!(conSet, Z_)
+	end
 	D,d = solver.conSet.D, solver.conSet.d
-	TrajOptCore.cost_gradient!(solver.J, solver.obj, Z)
-	jacobian!(solver.conSet, Z)
-
-	J = dot(solver.g, vect(dZ))
-	mul!(solver.r, D, vect(dZ))
-	c1 = μ*TrajOptCore.norm_dgrad(d, solver.r, 1)
-	return J + c1
+	TrajOptCore.norm_dgrad(d, D*dZ.Z, p)
 end
 
-function l1grad(J::Objective, obj::Objective, conSet, Z::Traj)
-	TrajOptCore.cost_gradient!(J, obj, Z)
-	jacobian!(conSet, Z)
+function TrajOptCore.cost_dhess(solver::SparseSolver, Z=TrajOptCore.get_primals(solver),
+		dZ=TrajOptCore.get_step(solver); recalculate=true)
+	E = TrajOptCore.get_cost_expansion_error(solver)
+	if recalculate
+		obj = get_objective(solver)
+		cost_hessian!(E, obj, Traj(Z))
+	end
+	dot(dZ.Z, solver.G, dZ.Z)
 end
 
-function line_search(solver::SparseSolver, merit)
-
-	ϕ = merit(solver)
-	ϕ′ = TrajOptCore.derivative(merit, solver)
-
-	crit = TrajOptCore.WolfeConditions()
-	TrajOptCore.sufficient_decrease(crit, ϕ, ϕ′, 1.0)
-	# @btime TrajOptCore.sufficient_decrease($crit, $ϕ, $ϕ′, 1.0, true)
-	# @btime TrajOptCore.curvature($crit, $ϕ, $ϕ′, 1.0, true)
-	@btime $crit($ϕ, $ϕ′, 1.0, true)
-end
-
-function dgrad(J::Objective, obj::Objective, Z::Traj, dZ::Traj)
-	# Calculate the cost gradient, storing in J
-	TrajOptCore.cost_gradient!(J, obj, Z)
-
-	# Calculate the direction derivative of the cost in the direction dZ
-	dgrad(J, dZ)
+function TrajOptCore.second_order_correction!(solver::SparseSolver)
+	Z = solver.Z̄.Z
+	D = solver.conSet.D
+	d = solver.conSet.d
+	Z = TrajOptCore.get_primals(solver)     # get the current value of z + α⋅δz
+	evaluate!(get_constraints(solver), Z.Z_)  # update constraints at current step
+	jacobian!(get_constraints(solver), get_trajectory(solver))
+	δx̂ = -D'*((D*D')\d)
+	Z.Z .+= δx̂
 end

@@ -1,13 +1,13 @@
-using MeshCat
-using TrajOptPlots
-using TrajectoryOptimization
-using RobotZoo
-using ForwardDiff
 using TrajOptCore
+using RobotDynamics
+using RobotZoo
+using TrajectoryOptimization
+using TrajOptPlots
+using MeshCat
+using ForwardDiff
 using LQR
 using StaticArrays
 using LinearAlgebra
-using RobotDynamics
 using BenchmarkTools
 const TO = TrajectoryOptimization
 
@@ -17,7 +17,7 @@ if !isdefined(Main, :vis)
     set_mesh!(vis, RobotZoo.DubinsCar())
 end
 
-prob, = Problems.DubinsCar(:turn90, N=101)
+prob, = Problems.DubinsCar(:turn90, N=11)
 TrajOptCore.add_dynamics_constraints!(prob)
 n,m,N = size(prob)
 NN = LQR.num_vars(prob)
@@ -26,37 +26,32 @@ Z0 = LQR.Primals(prob).Z
 
 # Build solver
 solver = LQR.SparseSolver(prob)
+LQR.step!(solver)
 @time LQR.solve!(solver)
 
-LQR.step!(solver)
-merit = TrajOptCore.L1Merit(1.0)
-ϕ = merit(solver)
-ϕ′ = TrajOptCore.derivative(merit, solver)
+merit = TrajOptCore.L1Merit()
+ϕ = TrajOptCore.gen_ϕ(merit, solver)
+ϕ′ = TrajOptCore.gen_ϕ′(merit, solver)
 ls = TrajOptCore.SimpleBacktracking()
+ls = TrajOptCore.SecondOrderCorrector()
 crit = TrajOptCore.WolfeConditions()
-
-res = [zeros(n + 0*m*(k<N)) for k = 1:N]
-con = solver.conSet.convals[1]
-length(con.con)
-λ = [zeros(length(con.con)) for k in con.inds]
-TrajOptCore.norm_residual!(res, con, λ)
-@btime TrajOptCore.norm_residual!($res, $con, $λ)
-
-con.jac
 
 # Initialize
 solver.Z.Z .= Z0
+iter = 0
+merit.μ = 1
 
 # Take a step
 LQR.update!(solver)
+TrajOptCore.update_penalty!(merit, solver)
+merit.μ
 @show max_violation(solver)
-ϕ(0)
-dy = K(x)\r2(x)
 LQR._solve!(solver)
-solver.δZ.Z ≈ dy[1:NN]
-solver.λ ≈ dy[NN+1:end]
-
-α = TrajOptCore.line_search(ls, crit, ϕ, ϕ′)
+ϕ(0)
+ϕ(1)
+α = TrajOptCore.line_search(ls, crit, merit, solver)
 copyto!(solver.Z.Z, solver.Z̄.Z)
+iter += 1
 
 visualize!(vis, solver)
+@btime TrajOptCore.cost_dhess(solver)
