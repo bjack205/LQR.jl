@@ -214,27 +214,31 @@ end
 """
 	calculate_shur_factors!
 
-Calculate the shur compliment S = D*(H\\D') and the residual r = D*(H\\g) - d
+Calculate the shur compliment S = D*(G\\D') and the residual r = D*(G\\g) - d
+If `Ginv = false`, calculate `S = D*D'` and `r = -d`
 """
 function calculate_shur_factors!(F::Vector{<:BlockTriangular3},
-        Jinv::Vector{<:InvertedQuadratic}, blocks)
+        Jinv::Vector{<:InvertedQuadratic}, blocks, Ginv::Bool=true)
     N = length(blocks)
-	shur!(Jinv[1], blocks[1])
+	shur!(Jinv[1], blocks[1], Ginv)
     for k = 2:N
-        shur!(Jinv[k], blocks[k])
+        shur!(Jinv[k], blocks[k], Ginv)
         copy_shur!(F[k-1], blocks[k-1], blocks[k])
     end
     copy_shur!(F[N], blocks[N])
  end
 
-function shur!(Jinv, block)
+function shur!(Jinv, block, Ginv::Bool=true)
     transpose!(block.JYt, block.Y)
-    ldiv!(Jinv.chol, block.JYt)
+    if Ginv
+		ldiv!(Jinv.chol, block.JYt)
+		g = gradient(Jinv)
+		mul!(block.r, block.YJ, g)
+	else
+		block.r .*= 0
+	end
     mul!(block.YYt, block.Y, block.JYt)
     YYt = block.YYt
-
-    g = gradient(Jinv)
-    mul!(block.r, block.YJ, g)
 end
 
 """

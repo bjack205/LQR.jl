@@ -41,6 +41,7 @@ struct ConstraintBlock{T,VT,MT,MV}
     YJ::Transpose{T,Matrix{T}}
     r::Vector{T}                                     # partial residual - Y*Jinv*g
 	r_::Vector{SubArray{T,1,VT,Tuple{UnitRange{Int}},true}}  # partitions of r: [D2; C; D1]*Jinv*g
+	res::Vector{T}                                   # primal residual: Y'λ + g
 
     D2::SubArray{T,2,MV,Tuple{UnitRange{Int},Base.Slice{Base.OneTo{Int}}},false} # view of Y for prev dynamics
     C::SubArray{T,2,MV,Tuple{UnitRange{Int},Base.Slice{Base.OneTo{Int}}},false}  # view of Y for stage cons
@@ -57,6 +58,7 @@ function ConstraintBlock(n1::Int, p::Int, n2::Int, w::Int)
     YJ = transpose(JYt)
     r = zeros(n1+p+n2)
 	r_ = [view(r, 1:n1), view(r, n1 .+ (1:p)), view(r, (n1+p) .+ (1:n2))]
+	res = zeros(w)
 
     D2 = view(Y, 1:n1, :)
     C = view(Y, n1 .+ (1:p), :)
@@ -66,7 +68,7 @@ function ConstraintBlock(n1::Int, p::Int, n2::Int, w::Int)
 	rc = view(r, 1:p)
 	rd = view(r, p .+ (1:n2))
 
-    ConstraintBlock(y, Y, YYt, JYt, YJ, r, r_, D2, C, D1, c, d)
+    ConstraintBlock(y, Y, YYt, JYt, YJ, r, r_, res, D2, C, D1, c, d)
 end
 
 function ConstraintBlocks(model::AbstractModel, cons::ConstraintList)
@@ -213,3 +215,9 @@ end
 
 @inline TrajOptCore.get_convals(conSet::BlockConstraintSet) = conSet.convals
 @inline TrajOptCore.get_errvals(conSet::BlockConstraintSet) = conSet.errvals
+
+function TrajOptCore.residual!(res, conSet::BlockConstraintSet)
+	for (i,conval) in enumerate(TrajOptCore.get_errvals(conSet))
+		TrajOptCore.residual!(res, conval, conSet.λ[i])
+	end
+end

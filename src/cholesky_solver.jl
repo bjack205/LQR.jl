@@ -29,9 +29,14 @@ end
 
 @inline RobotDynamics.state(z::MutableKnotPoint) = z._x
 @inline RobotDynamics.control(z::MutableKnotPoint) = z._u
+
+function Base.:*(a::Real, z::MutableKnotPoint{<:Any,n,m}) where {n,m}
+	StaticKnotPoint(z.z*a, SVector{n}(1:n), SVector{m}(n .+ (1:m)), z.dt, z.t)
+end
+
 import RobotDynamics.get_z
 
-struct CholeskySolver{n̄,n,m,n̄m,nm,T}
+struct CholeskySolver{n̄,n,m,n̄m,nm,T} <: TrajOptCore.ConstrainedSolver{T}
     model::AbstractModel
     obj::Objective
     E::QuadraticExpansion{n,m,T}
@@ -44,6 +49,12 @@ struct CholeskySolver{n̄,n,m,n̄m,nm,T}
     Z::Vector{KnotPoint{T,n,m,nm}}
     Z̄::Vector{StaticKnotPoint{T,n,m,nm}}
     G::Vector{SizedMatrix{n,n̄,T,2}}
+	res::Vector{MVector{n̄m,T}}  # residual
+
+	# Line Search
+	merit::TrajOptCore.MeritFunction
+	crit::TrajOptCore.LineSearchCriteria
+	ls::TrajOptCore.LineSearch
 end
 
 function CholeskySolver(prob::Problem)
@@ -63,9 +74,24 @@ function CholeskySolver(prob::Problem)
 
 	G = [SizedMatrix{n,n̄}(zeros(n,n̄)) for k = 1:N+1]  # add one to the end to use as an intermediate result
 
+	res = [@MVector zeros(n̄+m) for k = 1:N]
+
+	# Line Search
+	merit = TrajOptCore.L1Merit()
+	crit = TrajOptCore.WolfeConditions()
+	ls = TrajOptCore.SecondOrderCorrector()
+
     CholeskySolver(prob.model, prob.obj, E, J, Jinv, conSet, shur_blocks, chol_blocks,
-		δZ, Z, Z̄, G)
+		δZ, Z, Z̄, G, res, merit, crit, ls)
 end
+
+@inline TrajOptCore.get_objective(solver::CholeskySolver) = solver.obj
+@inline TrajOptCore.get_cost_expansion(solver::CholeskySolver) = solver.J
+@inline TrajOptCore.get_solution(solver::CholeskySolver) = solver.Z
+@inline TrajOptCore.get_step(solver::CholeskySolver) = solver.δZ
+@inline TrajOptCore.get_primals(solver::CholeskySolver) = solver.Z̄
+@inline TrajOptCore.get_constraints(solver::CholeskySolver) = solver.conSet
+@inline TrajOptCore.get_trajectory(solver::CholeskySolver) = solver.Z
 
 num_vars(solver::CholeskySolver{n,<:Any,m}) where {n,m} = length(solver.obj)*n + (length(solver.obj)-1)*m
 Base.size(solver::CholeskySolver{<:Any,n,m}) where {n,m} = n,m,length(solver.obj)
@@ -81,6 +107,39 @@ function solve!(sol, solver::CholeskySolver)
     #     # Update cost function
     #     cost_expansion!(solver.J, solver.obj, solver.Z)
     # end
+end
+
+function step!(solver::CholeskySolver)
+	merit, ls, crit = solver.merit, solver.ls, solver.crit
+
+	# Update the cost and constraint expansions
+	update!(solver)
+
+	# Check convergence criteria
+	feas_p = max_violation(solver, recalculate=false)
+	feas_d = residual(solver, recalculate=false)
+	ϵ_d = 1e-5
+	ϵ_p = 1e-5
+	@show feas_p
+	@show feas_d
+	if feas_p < ϵ_p && feas_d < ϵ_d
+		return true
+	end
+
+	# Update merit penalty
+	TrajOptCore.update_penalty!(merit, solver)
+
+	# Solve the QOCP (Quadratic Optimal Control Problem)
+	_solve!(solver)
+
+	# Run the line search
+	α = TrajOptCore.line_search(ls, crit, merit, solver)
+	@show α
+
+	# Save the new iterate
+	copyto!(solver.Z, solver.Z̄)
+
+	return false
 end
 
 function update!(solver::CholeskySolver)
@@ -115,37 +174,93 @@ end
 
 function calculate_primals!(dZ::Traj, Jinv::Vector{<:InvertedQuadratic}, chol, blocks)
     N = length(blocks)
+	calc_residual!(blocks, Jinv, chol)
+
+	for k = 1:N
+		z = dZ[k]
+		calc_primals!(get_z(z), Jinv[k], blocks[k])
+	end
+end
+
+function calc_primals!(z, Jinv::InvertedQuadratic, block)
+	z .= block.res
+	ldiv!(Jinv.chol, z)
+	z .*= -1
+end
+
+function calc_residual!(blocks::Vector, Jinv::Vector{<:InvertedQuadratic}, chol, Ginv::Bool=true)
+	N = length(blocks)
     for k = 1:N
         g = gradient(Jinv[k])
-        z = dZ[k]
         if k == 1
-            calc_primals!(get_z(z), Jinv[k], chol[k], blocks[k])
+            calc_residual!(blocks[k], Jinv[k], chol[k], Ginv)
             # sol.Z_[k].z .+= -Hinv*(blocks[k].C'chol[k].μ .+ blocks[k].D1'chol[k].λ)
         else
-            calc_primals!(get_z(z), Jinv[k], chol[k], chol[k-1], blocks[k])
+            calc_residual!(blocks[k], Jinv[k], chol[k], chol[k-1], Ginv)
             # sol.Z_[k].z .+= -Hinv*(blocks[k].D2'chol[k-1].λ .+ blocks[k].C'chol[k].μ
             #     .+ blocks[k].D1'chol[k].λ)
         end
-        z.z .*= -1
     end
 end
 
-function calc_primals!(z, Jinv, chol, block)
+function calc_residual!(block, Jinv, chol, Ginv::Bool=true)
     # first time step
+	z = block.res
     mul!(z, block.D1', chol.λ)
     mul!(z, block.C', chol.μ, 1.0, 1.0)
-	add_gradient!(z, Jinv)
-    ldiv!(Jinv.chol, z)
+	if Ginv
+		add_gradient!(z, Jinv)
+	end
+    # ldiv!(Jinv.chol, z)
 end
 
-function calc_primals!(z, Jinv, chol, chol_prev, block)
+function calc_residual!(block, Jinv, chol, chol_prev, Ginv::Bool=true)
+	z = block.res
     mul!(z, block.D1', chol.λ)
     mul!(z, block.C', chol.μ, 1.0, 1.0)
     mul!(z, block.D2', chol_prev.λ, 1.0, 1.0)
-	add_gradient!(z, Jinv)
-    ldiv!(Jinv.chol, z)
+	if Ginv
+		add_gradient!(z, Jinv)
+	end
+    # ldiv!(Jinv.chol, z)
 end
 
+function residual(solver::CholeskySolver; recalculate=true)
+	if recalculate
+		conSet = get_constraints(solver)
+		Z = get_trajectory(solver)
+		jacobian!(conSet, Z)
+		cost_gradient!(TrajOptCore.get_cost_expansion(solver), get_objective(solver), Z)
+		update_cholesky!(solver.Jinv, solver.J)
+	end
+	calc_residual!(solver.conSet.blocks, solver.Jinv, solver.chol_blocks)
+	res = zeros(length(solver.obj))
+	for (k,block) in enumerate(solver.conSet.blocks)
+		res[k] = norm(block.res)
+	end
+	norm(res)
+end
+
+function TrajOptCore.second_order_correction!(solver::CholeskySolver{<:Any,<:Any,m}) where m
+	# Calculate dZ = -D*(D*D')\d
+	Z = TrajOptCore.get_primals(solver)      # current value of z + α*δz
+	evaluate!(solver.conSet, Z)  # update constraints
+
+	calculate_shur_factors!(solver.shur_blocks, solver.Jinv, solver.conSet.blocks, false)
+	cholesky!(solver.chol_blocks, solver.shur_blocks)
+	forward_substitution!(solver.chol_blocks)
+	backward_substitution!(solver.chol_blocks)
+	calc_residual!(solver.conSet.blocks, solver.Jinv, solver.chol_blocks, false)
+	N = size(solver)[3]
+	for k = 1:N-1
+		solver.conSet.blocks[k].res .*= -1
+		Z[k] += solver.conSet.blocks[k].res
+	end
+	solver.conSet.blocks[N].res .*= -1
+	Z[N] = StaticKnotPoint(Z[N],
+		[state(Z[N]) + solver.conSet.blocks[N].res; @SVector zeros(m)])
+	Z
+end
 
 
 # ~~~~~~~~ Get Block Pieces ~~~~~~~~~~~ #
@@ -193,6 +308,23 @@ function get_step(solver::CholeskySolver)
 	return Z
 end
 
+function get_residual(solver::CholeskySolver)
+	n,m,N = size(solver)
+	NN = num_vars(solver)
+	Z = zeros(NN)
+	ix = 1:n
+	iu = n .+ (1:m)
+	blocks = solver.conSet.blocks
+	for k = 1:N-1
+		Z[ix] .= blocks[k].res[1:n]
+		Z[iu] .= blocks[k].res[n .+ (1:m)]
+		ix = (n+m) .+ ix
+		iu = (n+m) .+ iu
+	end
+	Z[ix] .= blocks[N].res[1:n]
+	return Z
+end
+
 function get_shur_factors(solver::CholeskySolver)
 	P = sum(solver.conSet.p)
 	S = zeros(P,P)
@@ -218,4 +350,14 @@ function get_cholesky(solver::CholeskySolver)
 	λ = zeros(P)
 	copy_shur_factors!(U, d_, λ, solver.chol_blocks)
 	return UpperTriangular(U)
+end
+
+function norm_residual(solver::CholeskySolver{n,<:Any,m}) where {n,m}
+	res = solver.res
+	ix = 1:n
+	iu = n .+ (1:m)
+
+	for (k,cost) in enumerate(TrajOptCore.get_cost_expansion(solver))
+		res[k] = [cost.q; cost.r]
+	end
 end

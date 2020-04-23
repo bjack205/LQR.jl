@@ -293,10 +293,7 @@ function step!(solver::SparseSolver)
 
 	# Check convergence criteria
 	feas_p = max_violation(solver, recalculate=false)
-	D = solver.conSet.D
-	g = solver.g
-	λ = solver.λ
-	feas_d = norm(g + D'λ)
+	feas_d = residual(solver, recalculate=false)
 	ϵ_d = 1e-5
 	ϵ_p = 1e-5
 	@show feas_p
@@ -318,8 +315,6 @@ function step!(solver::SparseSolver)
 	# Save the new iterate
 	copyto!(solver.Z.Z, solver.Z̄.Z)
 
-	update!(solver)
-
 	return false
 end
 
@@ -333,6 +328,19 @@ function solve!(solver::SparseSolver)
 			break
 		end
 	end
+end
+
+function residual(solver::SparseSolver; recalculate=true)
+	if recalculate
+		conSet = get_constraints(solver)
+		Z = get_trajectory(solver)
+		jacobian!(conSet, Z)
+		cost_gradient!(TrajOptCore.get_cost_expansion(solver), get_objective(solver), Z)
+	end
+	D = solver.conSet.D
+	g = solver.g
+	λ = solver.λ
+	feas_d = norm(g + D'λ)
 end
 
 function TrajOptCore.cost_dgrad(solver::SparseSolver, Z=TrajOptCore.get_primals(solver),
@@ -368,12 +376,46 @@ function TrajOptCore.cost_dhess(solver::SparseSolver, Z=TrajOptCore.get_primals(
 end
 
 function TrajOptCore.second_order_correction!(solver::SparseSolver)
-	Z = solver.Z̄.Z
+	Z = TrajOptCore.get_primals(solver)     # get the current value of z + α⋅δz
 	D = solver.conSet.D
 	d = solver.conSet.d
-	Z = TrajOptCore.get_primals(solver)     # get the current value of z + α⋅δz
+	G = solver.G
+	g = solver.g
+	λ = solver.λ
+	P,NN = size(D)
 	evaluate!(get_constraints(solver), Z.Z_)  # update constraints at current step
-	jacobian!(get_constraints(solver), get_trajectory(solver))
+
+	# jacobian!(get_constraints(solver), get_trajectory(solver))
+	# F = cholesky!(D*D')
+
 	δx̂ = -D'*((D*D')\d)
+	# return δx̂
 	Z.Z .+= δx̂
+end
+
+function project!(solver::SparseSolver)
+	conSet = get_constraints(solver)
+	Z = TrajOptCore.get_primals(solver)
+	D,d = conSet.D, conSet.d
+	G,g = solver.G, solver.g
+	# GinvD = (G\D')
+	# S = D*GinvD
+	S = D*D'
+	F = cholesky(Symmetric(S))
+
+	evaluate!(conSet, Z.Z_)
+	c_max0 = max_violation(conSet)
+	α = 1.0
+	for i = 1:10
+		λ = -(F\d)
+		dZ = D'λ
+		Z.Z .+= α*dZ
+		evaluate!(conSet, Z.Z_)
+		c_max = max_violation(conSet)
+		@show c_max
+		if c_max < c_max0
+			return c_max
+		end
+		α /= 2.0
+	end
 end
