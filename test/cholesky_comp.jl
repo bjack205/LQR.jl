@@ -2,14 +2,13 @@ using TrajOptCore
 using RobotDynamics
 using RobotZoo
 using TrajectoryOptimization
-using TrajOptPlots
-using MeshCat
-using ForwardDiff
 using LQR
 using StaticArrays
 using LinearAlgebra
 using BenchmarkTools
 const TO = TrajectoryOptimization
+# using MeshCat
+# using TrajOptPlots
 
 prob, = Problems.DubinsCar(:turn90, N=11)
 TrajOptCore.add_dynamics_constraints!(prob)
@@ -18,11 +17,11 @@ Z0 = deepcopy(prob.Z)
 solver1 = CholeskySolver(prob)
 solver2 = LQR.SparseSolver(prob)
 
-LQR.benchmark_solve!(solver1)
-LQR.benchmark_solve!(solver2)
-
 LQR.solve!(solver1)
 LQR.solve!(solver2)
+
+LQR.benchmark_solve!(solver1)
+LQR.benchmark_solve!(solver2)
 
 initial_trajectory!(solver1, Z0)
 initial_trajectory!(solver2, Z0)
@@ -47,16 +46,13 @@ LQR._solve!(solver1)
 LQR._solve!(solver2)
 states(solver1.δZ) ≈ states(solver2.δZ.Z_)
 controls(solver1.δZ) ≈ controls(solver2.δZ.Z_)
-TrajOptCore.get_primals(solver1, 1.0)
-TrajOptCore.get_primals(solver2, 1.0)
+TO.get_primals(solver1, 1.0)
+TO.get_primals(solver2, 1.0)
 states(solver1.Z̄) ≈ states(solver2.Z̄.Z_)
 controls(solver1.Z̄) ≈ controls(solver2.Z̄.Z_)
 
-TrajOptCore.second_order_correction!(solver1)
-TrajOptCore.second_order_correction!(solver2)
-dx1 = LQR.get_residual(solver1)
-dx2 = -D2'*((D2*D2')\d2)
-dx1 ≈ dx2
+TO.second_order_correction!(solver1)
+TO.second_order_correction!(solver2)
 
 states(solver1.Z̄) ≈ states(solver2.Z̄.Z_)
 controls(solver1.Z̄) ≈ controls(solver2.Z̄.Z_)
@@ -79,28 +75,4 @@ d1 ≈ d2
 
 r1 = D1'λ1+g1
 r2 = D2'λ2+g2
-norm(r1)
-norm(r2)
-
-solver1.conSet.blocks[1].res
-solver1.chol_blocks[1].λ
-res = D'λ+g
-res[1:n+m]
-G1 = solver2.G[1:n+m,1:n+m]
-dz1 = solver2.δZ.Z_[1].z
-G1\res[1:n+m]
-
-
-solver1.conSet.blocks[2]
-
-max_violation(solver1) ≈ max_violation(solver2)
-LQR.norm_residual(solver1)
-solver1.res
-@btime LQR.norm_residual($solver1)
-cst = solver1.J[1]
-solver1
-size(solver1)
-@btime [$cst.q; $cst.r]
-solver1.J[1].q
-solver1.res
-get_cos
+norm(r1) ≈ norm(r2)

@@ -77,9 +77,9 @@ function CholeskySolver(prob::Problem)
 	res = [@MVector zeros(n̄+m) for k = 1:N]
 
 	# Line Search
-	merit = TrajOptCore.L1Merit()
-	crit = TrajOptCore.WolfeConditions()
-	ls = TrajOptCore.SecondOrderCorrector()
+	merit = TO.L1Merit()
+	crit = TO.WolfeConditions()
+	ls = TO.SecondOrderCorrector()
 
     CholeskySolver(prob.model, prob.obj, E, J, Jinv, conSet, shur_blocks, chol_blocks,
 		δZ, Z, Z̄, G, res, merit, crit, ls)
@@ -137,13 +137,13 @@ function step!(solver::CholeskySolver)
 	end
 
 	# Update merit penalty
-	TrajOptCore.update_penalty!(merit, solver)
+	TO.update_penalty!(merit, solver)
 
 	# Solve the QOCP (Quadratic Optimal Control Problem)
 	_solve!(solver)
 
 	# Run the line search
-	α = TrajOptCore.line_search(ls, crit, merit, solver)
+	α = TO.line_search(ls, crit, merit, solver)
 	@show α
 
 	# Save the new iterate
@@ -251,9 +251,9 @@ function residual(solver::CholeskySolver; recalculate=true)
 	norm(res)
 end
 
-function second_order_correction!(solver::CholeskySolver{<:Any,<:Any,m}) where m
+function TO.second_order_correction!(solver::CholeskySolver{<:Any,<:Any,m}) where m
 	# Calculate dZ = -D*(D*D')\d
-	Z = TrajOptCore.get_primals(solver)      # current value of z + α*δz
+	Z = TO.get_primals(solver)      # current value of z + α*δz
 	evaluate!(solver.conSet, Z)  # update constraints
 
 	calculate_shur_factors!(solver.shur_blocks, solver.Jinv, solver.conSet.blocks, false)
