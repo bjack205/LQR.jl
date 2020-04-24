@@ -216,8 +216,8 @@ end
 @inline TrajOptCore.get_convals(conSet::BlockConstraintSet) = conSet.convals
 @inline TrajOptCore.get_errvals(conSet::BlockConstraintSet) = conSet.errvals
 
-function TrajOptCore.residual!(res, conSet::BlockConstraintSet)
-	for (i,conval) in enumerate(TrajOptCore.get_errvals(conSet))
-		TrajOptCore.residual!(res, conval, conSet.λ[i])
-	end
-end
+# function TrajOptCore.residual!(res, conSet::BlockConstraintSet)
+# 	for (i,conval) in enumerate(TrajOptCore.get_errvals(conSet))
+# 		TrajOptCore.residual!(res, conval, conSet.λ[i])
+# 	end
+# end

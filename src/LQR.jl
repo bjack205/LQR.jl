@@ -1,4 +1,5 @@
 module LQR
+using TrajectoryOptimization
 using RobotDynamics
 using TrajOptCore
 using StaticArrays
@@ -6,6 +7,7 @@ using InplaceOps
 using LinearAlgebra
 using SparseArrays
 using BenchmarkTools
+const TO = TrajectoryOptimization
 
 abstract type AbstractSolver end
 
@@ -17,8 +19,7 @@ export
     LQRSolution,
     LeastSquaresSolver,
     DPSolver,
-    ConstraintBlock,
-    solve!
+    ConstraintBlock
 
 export
     num_constraints,

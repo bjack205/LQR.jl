@@ -118,7 +118,7 @@ end
 
 TrajOptCore.is_blockdiag(cost::QuadraticViewCost) = cost.zeroH
 
-struct SparseSolver{n̄,n,m,T} <: TrajOptCore.ConstrainedSolver{T}
+struct SparseSolver{n̄,n,m,T} <: ConstrainedSolver{T}
     model::AbstractModel
     obj::Objective
     E::Objective{QuadraticViewCost{n,m,T}}
@@ -140,9 +140,9 @@ struct SparseSolver{n̄,n,m,T} <: TrajOptCore.ConstrainedSolver{T}
     Z̄::Primals{n,m,T}                       # primals (temp)
 
 	# Line Search
-	merit::TrajOptCore.MeritFunction
-	crit::TrajOptCore.LineSearchCriteria
-	ls::TrajOptCore.LineSearch
+	merit::TrajectoryOptimization.MeritFunction
+	crit::TrajectoryOptimization.LineSearchCriteria
+	ls::TrajectoryOptimization.LineSearch
 
     DH::Transpose{T,SparseMatrixCSC{T,Int}} # Partial Shur compliment (D/H)
 
@@ -202,9 +202,9 @@ function SparseSolver(prob::Problem{<:Any,T}) where T
 	end
 
 	# Line Search
-	merit = TrajOptCore.L1Merit()
-	ls = TrajOptCore.SecondOrderCorrector()
-	crit = TrajOptCore.WolfeConditions()
+	merit = TrajectoryOptimization.L1Merit()
+	ls = TrajectoryOptimization.SecondOrderCorrector()
+	crit = TrajectoryOptimization.WolfeConditions()
 
 	SparseSolver(prob.model, prob.obj, E, J, J2, Jinv, conSet, Dblocks,
 		G, Ginv, Gblocks, g, S, r, λ, δZ, Z, Z̄, merit, crit, ls, DH)
@@ -217,13 +217,13 @@ function reset!(solver::SparseSolver)
 end
 
 @inline TrajOptCore.get_objective(solver::SparseSolver) = solver.obj
-@inline TrajOptCore.get_cost_expansion(solver::SparseSolver) = solver.J
-@inline TrajOptCore.get_solution(solver::SparseSolver) = solver.Z  # current estimate
-@inline TrajOptCore.get_step(solver::SparseSolver) = solver.δZ
+@inline TO.get_cost_expansion(solver::SparseSolver) = solver.J
+@inline TO.get_solution(solver::SparseSolver) = solver.Z  # current estimate
+@inline TO.get_step(solver::SparseSolver) = solver.δZ
 @inline TrajOptCore.get_constraints(solver::SparseSolver) = solver.conSet
 
-@inline TrajOptCore.get_primals(solver::SparseSolver) = solver.Z̄   # z + α⋅dz
-function TrajOptCore.get_primals(solver::SparseSolver, α)
+@inline TO.get_primals(solver::SparseSolver) = solver.Z̄   # z + α⋅dz
+function TO.get_primals(solver::SparseSolver, α)
 	Z̄ = vect(solver.Z̄)
 	Z = vect(solver.Z)
 	dZ = vect(solver.δZ)
@@ -309,13 +309,13 @@ function step!(solver::SparseSolver)
 	end
 
 	# Update merit penalty
-	TrajOptCore.update_penalty!(merit, solver)
+	TO.update_penalty!(merit, solver)
 
 	# Solve the QOCP (Quadratic Optimal Control Problem)
 	_solve!(solver)
 
 	# Run the line search
-	α = TrajOptCore.line_search(ls, crit, merit, solver)
+	α = TO.line_search(ls, crit, merit, solver)
 	@show α
 
 	# Save the new iterate
@@ -350,17 +350,17 @@ function residual(solver::SparseSolver; recalculate=true)
 	feas_d = norm(g + D'λ)
 end
 
-function TrajOptCore.cost_dgrad(solver::SparseSolver, Z=TrajOptCore.get_primals(solver),
+function TO.cost_dgrad(solver::SparseSolver, Z=TrajOptCore.get_primals(solver),
 		dZ=TrajOptCore.get_step(solver); recalculate=true)
 	if recalculate
-		E = TrajOptCore.get_cost_expansion(solver)
+		E = TO.get_cost_expansion(solver)
 		obj = get_objective(solver)
 		cost_gradient!(E, obj, Z.Z_)
 	end
 	solver.g'dZ.Z
 end
 
-function TrajOptCore.norm_dgrad(solver::SparseSolver, Z=TrajOptCore.get_primals(solver),
+function TO.norm_dgrad(solver::SparseSolver, Z=TrajOptCore.get_primals(solver),
 		dZ=TrajOptCore.get_step(solver); recalculate=true, p=1)
     conSet = get_constraints(solver)
 	if recalculate
@@ -372,7 +372,7 @@ function TrajOptCore.norm_dgrad(solver::SparseSolver, Z=TrajOptCore.get_primals(
 	TrajOptCore.norm_dgrad(d, D*dZ.Z, p)
 end
 
-function TrajOptCore.cost_dhess(solver::SparseSolver, Z=TrajOptCore.get_primals(solver),
+function cost_dhess(solver::SparseSolver, Z=TrajOptCore.get_primals(solver),
 		dZ=TrajOptCore.get_step(solver); recalculate=true)
 	E = TrajOptCore.get_cost_expansion_error(solver)
 	if recalculate
@@ -382,8 +382,8 @@ function TrajOptCore.cost_dhess(solver::SparseSolver, Z=TrajOptCore.get_primals(
 	dot(dZ.Z, solver.G, dZ.Z)
 end
 
-function TrajOptCore.second_order_correction!(solver::SparseSolver)
-	Z = TrajOptCore.get_primals(solver)     # get the current value of z + α⋅δz
+function TO.second_order_correction!(solver::SparseSolver)
+	Z = TO.get_primals(solver)     # get the current value of z + α⋅δz
 	D = solver.conSet.D
 	d = solver.conSet.d
 	G = solver.G

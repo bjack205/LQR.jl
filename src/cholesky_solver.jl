@@ -36,7 +36,7 @@ end
 
 import RobotDynamics.get_z
 
-struct CholeskySolver{n̄,n,m,n̄m,nm,T} <: TrajOptCore.ConstrainedSolver{T}
+struct CholeskySolver{n̄,n,m,n̄m,nm,T} <: ConstrainedSolver{T}
     model::AbstractModel
     obj::Objective
     E::QuadraticExpansion{n,m,T}
@@ -52,9 +52,9 @@ struct CholeskySolver{n̄,n,m,n̄m,nm,T} <: TrajOptCore.ConstrainedSolver{T}
 	res::Vector{MVector{n̄m,T}}  # residual
 
 	# Line Search
-	merit::TrajOptCore.MeritFunction
-	crit::TrajOptCore.LineSearchCriteria
-	ls::TrajOptCore.LineSearch
+	merit::TrajectoryOptimization.MeritFunction
+	crit::TrajectoryOptimization.LineSearchCriteria
+	ls::TrajectoryOptimization.LineSearch
 end
 
 function CholeskySolver(prob::Problem)
@@ -94,10 +94,10 @@ function reset!(solver::CholeskySolver)
 end
 
 @inline TrajOptCore.get_objective(solver::CholeskySolver) = solver.obj
-@inline TrajOptCore.get_cost_expansion(solver::CholeskySolver) = solver.J
-@inline TrajOptCore.get_solution(solver::CholeskySolver) = solver.Z
-@inline TrajOptCore.get_step(solver::CholeskySolver) = solver.δZ
-@inline TrajOptCore.get_primals(solver::CholeskySolver) = solver.Z̄
+@inline TO.get_cost_expansion(solver::CholeskySolver) = solver.J
+@inline TO.get_solution(solver::CholeskySolver) = solver.Z
+@inline TO.get_step(solver::CholeskySolver) = solver.δZ
+@inline TO.get_primals(solver::CholeskySolver) = solver.Z̄
 @inline TrajOptCore.get_constraints(solver::CholeskySolver) = solver.conSet
 @inline TrajOptCore.get_trajectory(solver::CholeskySolver) = solver.Z
 
@@ -251,7 +251,7 @@ function residual(solver::CholeskySolver; recalculate=true)
 	norm(res)
 end
 
-function TrajOptCore.second_order_correction!(solver::CholeskySolver{<:Any,<:Any,m}) where m
+function second_order_correction!(solver::CholeskySolver{<:Any,<:Any,m}) where m
 	# Calculate dZ = -D*(D*D')\d
 	Z = TrajOptCore.get_primals(solver)      # current value of z + α*δz
 	evaluate!(solver.conSet, Z)  # update constraints
