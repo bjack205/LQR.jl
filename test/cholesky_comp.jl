@@ -13,12 +13,30 @@ const TO = TrajectoryOptimization
 
 prob, = Problems.DubinsCar(:turn90, N=11)
 TrajOptCore.add_dynamics_constraints!(prob)
+Z0 = deepcopy(prob.Z)
 
 solver1 = CholeskySolver(prob)
 solver2 = LQR.SparseSolver(prob)
 
+LQR.benchmark_solve!(solver1)
+LQR.benchmark_solve!(solver2)
+
+LQR.solve!(solver1)
+LQR.solve!(solver2)
+
+initial_trajectory!(solver1, Z0)
+initial_trajectory!(solver2, Z0)
+
 LQR.step!(solver1)
 LQR.step!(solver2)
+
+solver1 = CholeskySolver(prob)
+LQR.step!(solver1)
+LQR.solve!(solver1)
+# LQR.step!(solver2)
+initial_trajectory!(solver1, Z0)
+LQR.step!(solver1)
+LQR.solve!(solver1)
 
 LQR.update!(solver1)
 LQR.update!(solver2)

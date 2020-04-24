@@ -85,6 +85,14 @@ function CholeskySolver(prob::Problem)
 		δZ, Z, Z̄, G, res, merit, crit, ls)
 end
 
+function reset!(solver::CholeskySolver)
+	solver.merit.μ = 1.0
+	N = size(solver)[3]
+	for k = 1:N
+		solver.δZ[k].z .*= 0
+	end
+end
+
 @inline TrajOptCore.get_objective(solver::CholeskySolver) = solver.obj
 @inline TrajOptCore.get_cost_expansion(solver::CholeskySolver) = solver.J
 @inline TrajOptCore.get_solution(solver::CholeskySolver) = solver.Z
@@ -98,15 +106,17 @@ Base.size(solver::CholeskySolver{<:Any,n,m}) where {n,m} = n,m,length(solver.obj
 
 TrajOptCore.get_model(solver::CholeskySolver) = solver.model
 
-function solve!(sol, solver::CholeskySolver)
-    # for i = 1:10
-    #     # Update constraints
-    #     evaluate!(blocks, solver.Z)
-    #     jacobian!(blocks, solver.Z)
-    #
-    #     # Update cost function
-    #     cost_expansion!(solver.J, solver.obj, solver.Z)
-    # end
+function solve!(solver::CholeskySolver)
+	reset!(solver)
+	iters = 10
+	update!(solver)
+
+	for i = 1:iters
+		converged = step!(solver)
+		if converged
+			break
+		end
+	end
 end
 
 function step!(solver::CholeskySolver)

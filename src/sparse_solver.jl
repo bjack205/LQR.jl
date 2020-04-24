@@ -210,6 +210,12 @@ function SparseSolver(prob::Problem{<:Any,T}) where T
 		G, Ginv, Gblocks, g, S, r, λ, δZ, Z, Z̄, merit, crit, ls, DH)
 end
 
+function reset!(solver::SparseSolver)
+	solver.merit.μ = 1.0
+	solver.λ .*= 0
+	solver.δZ.Z .*= 0
+end
+
 @inline TrajOptCore.get_objective(solver::SparseSolver) = solver.obj
 @inline TrajOptCore.get_cost_expansion(solver::SparseSolver) = solver.J
 @inline TrajOptCore.get_solution(solver::SparseSolver) = solver.Z  # current estimate
@@ -319,6 +325,7 @@ function step!(solver::SparseSolver)
 end
 
 function solve!(solver::SparseSolver)
+	reset!(solver)
 	iters = 10
 	update!(solver)
 

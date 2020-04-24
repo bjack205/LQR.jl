@@ -41,6 +41,7 @@ solver.Z.Z .= Z0
 iter = 0
 merit.μ = 1
 
+
 # Take a step
 LQR.update!(solver)
 TrajOptCore.update_penalty!(merit, solver)
@@ -49,6 +50,10 @@ merit.μ
 LQR._solve!(solver)
 ϕ(0)
 ϕ(1)
+max_violation(solver, recalculate=false)
+LQR.project!(solver)
+ϕ()
+max_violation(solver, recalculate=false)
 α = TrajOptCore.line_search(ls, crit, merit, solver)
 copyto!(solver.Z.Z, solver.Z̄.Z)
 iter += 1
