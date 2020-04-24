@@ -5,6 +5,7 @@ using StaticArrays
 using InplaceOps
 using LinearAlgebra
 using SparseArrays
+using BenchmarkTools
 
 abstract type AbstractSolver end
 
@@ -23,6 +24,15 @@ export
     num_constraints,
     num_vars,
     dims
+
+function benchmark_solve!(solver; samples=10, evals=10)
+    Z0 = deepcopy(get_trajectory(solver))
+    b = @benchmark begin
+        initial_trajectory!($solver,$Z0)
+        solve!($solver)
+    end samples=samples evals=evals
+    return b
+end
 
 include("lqr_problem.jl")
 include("least_squares.jl")
