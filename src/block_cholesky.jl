@@ -110,9 +110,9 @@ struct InvertedQuadratic{n,m,T,S}
     r::MVector{m,T}
 end
 
-function InvertedQuadratic(cost::TrajOptCore.QuadraticCostFunction{n,m}) where {n,m}
+function InvertedQuadratic(cost::TO.QuadraticCostFunction{n,m}) where {n,m}
     m̄ = m * !cost.terminal
-    if TrajOptCore.is_diag(cost)
+    if TO.is_diag(cost)
         chol = BlockCholesky(n, m̄, diag=true)
     else
         M = zeros(n+m̄,n+m̄)
@@ -142,8 +142,8 @@ function add_gradient!(z, icost::InvertedQuadratic{n,m}) where {n,m}
     end
 end
 
-function update_cost!(icost::InvertedQuadratic, cost::TrajOptCore.QuadraticCostFunction)
-    if TrajOptCore.is_blockdiag(cost)
+function update_cost!(icost::InvertedQuadratic, cost::TO.QuadraticCostFunction)
+    if TO.is_blockdiag(cost)
         cholesky!(icost.chol, cost.Q, cost.R)
     else
         cholesky!(icost.chol, cost.Q, cost.R, cost.H')

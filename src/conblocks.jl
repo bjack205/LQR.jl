@@ -134,7 +134,7 @@ function gen_con_inds(conSet::ConstraintList, structure=:by_knotpoint)
 	if structure == :by_constraint
 	    for (i,con) in enumerate(conSet.constraints)
 			for (j,k) in enumerate(conSet.inds[i])
-				cons[i][TrajOptCore._index(con,k)] = idx .+ (1:conLen[i])
+				cons[i][TO._index(con,k)] = idx .+ (1:conLen[i])
 				idx += conLen[i]
 	        end
 	    end
@@ -165,8 +165,7 @@ function gen_con_inds(conSet::ConstraintList, structure=:by_knotpoint)
     return cons
 end
 
-
-struct BlockConstraintSet{T} <: TrajOptCore.AbstractConstraintSet
+struct BlockConstraintSet{T} <: TO.AbstractConstraintSet
 	convals::Vector{ConVal}
 	errvals::Vector{ConVal}
 	blocks::Vector{ConstraintBlock{T,Vector{T},Matrix{T},Matrix{T}}}
@@ -190,7 +189,7 @@ function BlockConstraintSet(model::AbstractModel, cons::ConstraintList)
 	# Create the ConVals
 	useG = model isa LieGroupModel
 	errvals = map(enumerate(zip(cons))) do (i,(inds,con))
-	    C,c = TrajOptCore.gen_convals(blocks, cinds[i], con, inds)
+	    C,c = TO.gen_convals(blocks, cinds[i], con, inds)
 	    ConVal(n̄, m, con, inds, C, c, useG)
 	end
 	convals = map(errvals) do errval
@@ -213,8 +212,8 @@ function BlockConstraintSet(model::AbstractModel, cons::ConstraintList)
 	BlockConstraintSet(convals, errvals, blocks, λ, a, c_max, copy(cons.p))
 end
 
-@inline TrajOptCore.get_convals(conSet::BlockConstraintSet) = conSet.convals
-@inline TrajOptCore.get_errvals(conSet::BlockConstraintSet) = conSet.errvals
+@inline TO.get_convals(conSet::BlockConstraintSet) = conSet.convals
+@inline TO.get_errvals(conSet::BlockConstraintSet) = conSet.errvals
 
 # function TrajOptCore.residual!(res, conSet::BlockConstraintSet)
 # 	for (i,conval) in enumerate(TrajOptCore.get_errvals(conSet))

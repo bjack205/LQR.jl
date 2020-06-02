@@ -192,9 +192,9 @@ end
 @inline traj(Z::Primals) = Z.Z_
 @inline vect(Z::Primals) = Z.Z
 
-@inline RobotDynamics.rollout!(sol::Primals, prob::LQRProblem) =
+@inline TO.rollout!(sol::Primals, prob::LQRProblem) =
     rollout!(sol, prob.A, prob.B, prob.x0)
-function RobotDynamics.rollout!(sol::Primals, A, B, x0)
+function TO.rollout!(sol::Primals, A, B, x0)
     sol.X[1] .= x0
     for k in eachindex(sol.U)
         sol.X[k+1] .= A * sol.X[k] + B * sol.U[k]

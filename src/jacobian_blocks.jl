@@ -1,4 +1,4 @@
-using TrajOptCore
+# using TrajOptCore
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~#
 #      COST FUNCTIONS       #
@@ -36,7 +36,7 @@ function build_H!(H, obj::Objective{<:Diagonal}, ::Size{sa}) where sa
     iz = SVector{n+m}(1:n+m)
     ix = SVector{n}(1:n)
     for k = 1:N-1
-        H_ = TrajOptCore.hessian(obj.cost[k])
+        H_ = TO.hessian(obj.cost[k])
         H[iz,iz] = H_
         iz = iz .+ (n+m)
     end
@@ -70,7 +70,7 @@ function build_H!(H, obj::Objective{<:DiagonalCost{n,m}}) where {n,m}
     end
 end
 
-function build_H!(H, obj::Objective{<:TrajOptCore.QuadraticCostFunction})
+function build_H!(H, obj::Objective{<:TO.QuadraticCostFunction})
     N = length(obj)
     n = length(obj[1].q)
     m = length(obj[1].r)

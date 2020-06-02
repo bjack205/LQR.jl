@@ -1,8 +1,8 @@
-using TrajOptCore
+# using TrajOptCore
 using BenchmarkTools
 
 using SuiteSparse
-struct SparseConstraintSet{T} <: TrajOptCore.AbstractConstraintSet
+struct SparseConstraintSet{T} <: TO.AbstractConstraintSet
 	convals::Vector{ConVal}
 	errvals::Vector{ConVal}
 	cinds::Vector{Vector{UnitRange{Int}}}
@@ -14,7 +14,7 @@ end
 
 function SparseConstraintSet(model::AbstractModel, cons::ConstraintList,
 		jac_structure=:by_knotpoint)
-	if !TrajOptCore.has_dynamics_constraint(cons)
+	if !TO.has_dynamics_constraint(cons)
 		throw(ArgumentError("must contain a dynamics constraint"))
 	end
 
@@ -36,7 +36,7 @@ function SparseConstraintSet(model::AbstractModel, cons::ConstraintList,
 	zinds = [(k-1)*(n+m) .+ (1:n+m) for k = 1:N]
 	useG = model isa LieGroupModel
 	errvals = map(enumerate(zip(cons))) do (i,(inds,con))
-		C,c = TrajOptCore.gen_convals(D, d, cinds[i], zinds, con, inds)
+		C,c = TO.gen_convals(D, d, cinds[i], zinds, con, inds)
 		ConVal(n̄, m, con, inds, C, c)
 	end
 	convals = map(errvals) do errval
@@ -48,14 +48,14 @@ function SparseConstraintSet(model::AbstractModel, cons::ConstraintList,
 	SparseConstraintSet(convals, errvals, cinds, zinds, D, d, zeros(ncon))
 end
 
-@inline TrajOptCore.get_convals(conSet::SparseConstraintSet) = conSet.convals
-@inline TrajOptCore.get_errvals(conSet::SparseConstraintSet) = conSet.errvals
+@inline TO.get_convals(conSet::SparseConstraintSet) = conSet.convals
+@inline TO.get_errvals(conSet::SparseConstraintSet) = conSet.errvals
 
 function norm_violation(conSet::SparseConstraintSet, p=2)
 	norm(conSet.d, p)
 end
 
-struct QuadraticViewCost{n,m,T} <: TrajOptCore.QuadraticCostFunction{n,m,T}
+struct QuadraticViewCost{n,m,T} <: TO.QuadraticCostFunction{n,m,T}
 	Q::SubArray{T,2,SparseMatrixCSC{T,Int},Tuple{UnitRange{Int},UnitRange{Int}},false}
 	R::SubArray{T,2,SparseMatrixCSC{T,Int},Tuple{UnitRange{Int},UnitRange{Int}},false}
 	H::SubArray{T,2,SparseMatrixCSC{T,Int},Tuple{UnitRange{Int},UnitRange{Int}},false}
@@ -66,9 +66,6 @@ struct QuadraticViewCost{n,m,T} <: TrajOptCore.QuadraticCostFunction{n,m,T}
 	terminal::Bool
 	function QuadraticViewCost(Q::SubArray, R::SubArray, H::SubArray,
 		q::SubArray, r::SubArray, c::Real; checks::Bool=true, terminal::Bool=false)
-		if checks
-			TrajOptCore.run_posdef_checks(Q,R)
-		end
 		n,m = length(q), length(r)
         T = promote_type(eltype(Q), eltype(R), eltype(H), eltype(q), eltype(r), typeof(c))
         zeroH = norm(H,Inf) ≈ 0
@@ -77,7 +74,7 @@ struct QuadraticViewCost{n,m,T} <: TrajOptCore.QuadraticCostFunction{n,m,T}
 end
 
 function QuadraticViewCost(G::SparseMatrixCSC, g::Vector,
-		cost::TrajOptCore.QuadraticCostFunction, k::Int)
+		cost::TO.QuadraticCostFunction, k::Int)
 	n,m = state_dim(cost), control_dim(cost)
 	ix = (k-1)*(n+m) .+ (1:n)
 	iu = ((k-1)*(n+m) + n) .+ (1:m)
@@ -108,7 +105,7 @@ function QuadraticViewCost(G::SparseMatrixCSC, g::Vector,
 			R .= cost.R
 		end
 		r .= cost.r
-		if !TrajOptCore.is_blockdiag(cost)
+		if !TO.is_blockdiag(cost)
 			H .= cost.H
 		end
 	end
@@ -116,11 +113,11 @@ function QuadraticViewCost(G::SparseMatrixCSC, g::Vector,
 	QuadraticViewCost(Q, R, H, q, r, cost.c, checks=false, terminal=cost.terminal)
 end
 
-TrajOptCore.is_blockdiag(cost::QuadraticViewCost) = cost.zeroH
+TO.is_blockdiag(cost::QuadraticViewCost) = cost.zeroH
 
-struct SparseSolver{n̄,n,m,T} <: ConstrainedSolver{T}
+struct SparseSolver{n̄,n,m,T,O} #<: ConstrainedSolver{T}
     model::AbstractModel
-    obj::Objective
+    obj::O
     E::Objective{QuadraticViewCost{n,m,T}}
     J::Objective{QuadraticViewCost{n̄,m,T}}
 	J2::Objective
@@ -140,9 +137,9 @@ struct SparseSolver{n̄,n,m,T} <: ConstrainedSolver{T}
     Z̄::Primals{n,m,T}                       # primals (temp)
 
 	# Line Search
-	merit::TrajectoryOptimization.MeritFunction
-	crit::TrajectoryOptimization.LineSearchCriteria
-	ls::TrajectoryOptimization.LineSearch
+	merit::MeritFunction
+	crit::LineSearchCriteria
+	ls::LineSearch
 
     DH::Transpose{T,SparseMatrixCSC{T,Int}} # Partial Shur compliment (D/H)
 
@@ -173,7 +170,7 @@ function SparseSolver(prob::Problem{<:Any,T}) where T
 	J = Objective([LQR.QuadraticViewCost(
 			G, g, QuadraticCost{Float64}(n, m, terminal=(k==N)),k)
 			for k = 1:N])
-	J2 = TrajOptCore.build_cost_expansion(prob.obj, prob.model)[1]
+	J2 = TO.build_cost_expansion(prob.obj, prob.model)[1]
 	if prob.model isa LieGroupModel
 		E = QuadraticObjective(n,m,N)
 	else
@@ -202,9 +199,9 @@ function SparseSolver(prob::Problem{<:Any,T}) where T
 	end
 
 	# Line Search
-	merit = TrajectoryOptimization.L1Merit()
-	ls = TrajectoryOptimization.SecondOrderCorrector()
-	crit = TrajectoryOptimization.WolfeConditions()
+	merit = L1Merit()
+	ls = SecondOrderCorrector()
+	crit = WolfeConditions()
 
 	SparseSolver(prob.model, prob.obj, E, J, J2, Jinv, conSet, Dblocks,
 		G, Ginv, Gblocks, g, S, r, λ, δZ, Z, Z̄, merit, crit, ls, DH)
@@ -216,14 +213,15 @@ function reset!(solver::SparseSolver)
 	solver.δZ.Z .*= 0
 end
 
-@inline TrajOptCore.get_objective(solver::SparseSolver) = solver.obj
-@inline TO.get_cost_expansion(solver::SparseSolver) = solver.J
-@inline TO.get_solution(solver::SparseSolver) = solver.Z  # current estimate
-@inline TO.get_step(solver::SparseSolver) = solver.δZ
-@inline TrajOptCore.get_constraints(solver::SparseSolver) = solver.conSet
+@inline TO.get_objective(solver::SparseSolver) = solver.obj
+@inline get_cost_expansion(solver::SparseSolver) = solver.J
+@inline get_solution(solver::SparseSolver) = solver.Z  # current estimate
+@inline get_step(solver::SparseSolver) = solver.δZ
+@inline TO.get_constraints(solver::SparseSolver) = solver.conSet
+@inline TO.get_trajectory(solver::SparseSolver) = Traj(solver.Z.Z_)
 
-@inline TO.get_primals(solver::SparseSolver) = solver.Z̄   # z + α⋅dz
-function TO.get_primals(solver::SparseSolver, α)
+@inline get_primals(solver::SparseSolver) = solver.Z̄   # z + α⋅dz
+function get_primals(solver::SparseSolver, α)
 	Z̄ = vect(solver.Z̄)
 	Z = vect(solver.Z)
 	dZ = vect(solver.δZ)
@@ -233,14 +231,14 @@ function TO.get_primals(solver::SparseSolver, α)
 	return solver.Z̄
 end
 
-@inline TrajOptCore.cost(solver::SparseSolver, Z::Primals) = cost(solver, traj(Z))
-@inline TrajOptCore.evaluate!(conSet::TrajOptCore.AbstractConstraintSet, Z::Primals) = evaluate!(conSet, traj(Z))
+@inline TO.cost(solver::SparseSolver, Z::Primals) = cost(solver, traj(Z))
+@inline TO.evaluate!(conSet::TO.AbstractConstraintSet, Z::Primals) = evaluate!(conSet, traj(Z))
 
 function update!(solver::SparseSolver, Z = solver.Z)
-	Z = Z.Z_
+	Z = Traj(Z.Z_)
 	evaluate!(solver.conSet, Z)
 	jacobian!(solver.conSet, Z)
-	cost_expansion!(solver.E, solver.obj, Z)
+	TO.cost_expansion!(solver.E, solver.obj, Z)
 	cost_expansion!(solver.J2, solver.obj, Z)
 	update_cholesky!(solver.Jinv, solver.J)
 end
@@ -252,7 +250,7 @@ end
 
 function calc_Ginv!(Gblocks, obj::Objective)
 	for k in eachindex(Gblocks)
-		TrajOptCore.invert!(Gblocks[k], obj[k])
+		TO.invert!(Gblocks[k], obj[k])
 	end
 end
 
@@ -342,7 +340,7 @@ function residual(solver::SparseSolver; recalculate=true)
 		conSet = get_constraints(solver)
 		Z = get_trajectory(solver)
 		jacobian!(conSet, Z)
-		cost_gradient!(TrajOptCore.get_cost_expansion(solver), get_objective(solver), Z)
+		cost_gradient!(TO.get_cost_expansion(solver), get_objective(solver), Z)
 	end
 	D = solver.conSet.D
 	g = solver.g
@@ -350,31 +348,31 @@ function residual(solver::SparseSolver; recalculate=true)
 	feas_d = norm(g + D'λ)
 end
 
-function TO.cost_dgrad(solver::SparseSolver, Z=TrajOptCore.get_primals(solver),
-		dZ=TrajOptCore.get_step(solver); recalculate=true)
+function TO.cost_dgrad(solver::SparseSolver, Z=TO.get_primals(solver),
+		dZ=TO.get_step(solver); recalculate=true)
 	if recalculate
 		E = TO.get_cost_expansion(solver)
 		obj = get_objective(solver)
-		cost_gradient!(E, obj, Z.Z_)
+		cost_gradient!(E, obj, Traj(Z.Z_))
 	end
 	solver.g'dZ.Z
 end
 
-function TO.norm_dgrad(solver::SparseSolver, Z=TrajOptCore.get_primals(solver),
-		dZ=TrajOptCore.get_step(solver); recalculate=true, p=1)
+function TO.norm_dgrad(solver::SparseSolver, Z=TO.get_primals(solver),
+		dZ=TO.get_step(solver); recalculate=true, p=1)
     conSet = get_constraints(solver)
 	if recalculate
-		Z_ = Z.Z_
+		Z_ = Traj(Z.Z_)
 		evaluate!(conSet, Z_)
 		jacobian!(conSet, Z_)
 	end
 	D,d = solver.conSet.D, solver.conSet.d
-	TrajOptCore.norm_dgrad(d, D*dZ.Z, p)
+	TO.norm_dgrad(d, D*dZ.Z, p)
 end
 
-function cost_dhess(solver::SparseSolver, Z=TrajOptCore.get_primals(solver),
-		dZ=TrajOptCore.get_step(solver); recalculate=true)
-	E = TrajOptCore.get_cost_expansion_error(solver)
+function cost_dhess(solver::SparseSolver, Z=TO.get_primals(solver),
+		dZ=TO.get_step(solver); recalculate=true)
+	E = TO.get_cost_expansion_error(solver)
 	if recalculate
 		obj = get_objective(solver)
 		cost_hessian!(E, obj, Traj(Z))
@@ -390,7 +388,7 @@ function TO.second_order_correction!(solver::SparseSolver)
 	g = solver.g
 	λ = solver.λ
 	P,NN = size(D)
-	evaluate!(get_constraints(solver), Z.Z_)  # update constraints at current step
+	evaluate!(get_constraints(solver), Traj(Z.Z_))  # update constraints at current step
 
 	# jacobian!(get_constraints(solver), get_trajectory(solver))
 	# F = cholesky!(D*D')
@@ -402,7 +400,7 @@ end
 
 function project!(solver::SparseSolver)
 	conSet = get_constraints(solver)
-	Z = TrajOptCore.get_primals(solver)
+	Z = TO.get_primals(solver)
 	D,d = conSet.D, conSet.d
 	G,g = solver.G, solver.g
 	# GinvD = (G\D')

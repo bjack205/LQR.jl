@@ -1,4 +1,6 @@
-using TrajOptCore
+import Pkg; Pkg.activate(joinpath(@__DIR__,".."))
+using LQR
+
 using RobotDynamics
 using RobotZoo
 using TrajectoryOptimization

@@ -10,7 +10,7 @@ struct LCRProblem{n,m,T}
     N::Int
 end
 
-TrajOptCore.num_constraints(prob::LCRProblem) = con_dim.(prob.con)
+TO.num_constraints(prob::LCRProblem) = con_dim.(prob.con)
 @inline Base.size(prob::LCRProblem{n,m}) where {n,m} = n,m,prob.N
 @inline function num_vars(prob)
     n,m,N = size(prob)
