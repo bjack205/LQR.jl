@@ -34,6 +34,7 @@ end
 compute_gain!(K, solver::DPSolver, prob::LQRProblem) =
     compute_gain!(K, solver.P, prob.A, prob.B, prob.Q, prob.R,
         solver.PA, solver.PB, solver.APB, solver.E)
+
 function compute_gain!(K, P, A, B, Q, R, PA, PB, APB, E)
     PB .= P*B
     E .= R .+ B'PB
@@ -51,21 +52,22 @@ function compute_ctg!(P_, K, P, A, B, Q, R, PA, PB, APB, E)
     P_ .= Q .+ A'PA .- APB*K
 end
 
-function solve!(sol::LQRSolution, solver::DPSolver, prob::LQRProblem)
+function solve!(sol::Primals, solver::DPSolver, prob::LQRProblem{n,m}) where {n,m}
     N = prob.N
 
     # Terminal ctg
     solver.P .= prob.Qf
+    K = [zero(SizedMatrix{m,n,Float64}) for k = 1:N]
 
     # Riccati BP
     for k = N-1:-1:1
-        compute_ctg!(sol.K[k], solver, prob)
+        compute_ctg!(K[k], solver, prob)
         solver.P .= solver.P_
     end
 
     sol.X[1] .= prob.x0
     for k = 1:N-1
-        sol.U[k] .= -sol.K[k] * sol.X[k]
+        sol.U[k] .= -K[k] * sol.X[k]
         sol.X[k+1] .= prob.A*sol.X[k] + prob.B*sol.U[k]
     end
 
